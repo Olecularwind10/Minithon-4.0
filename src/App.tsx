@@ -8,7 +8,6 @@ import {
   Clock3,
   HeartHandshake,
   House,
-  LogOut,
   MapPin,
   Plus,
   Search,
@@ -22,7 +21,6 @@ import {
   NavLink,
   Route,
   Routes,
-  useLocation,
   useNavigate,
 } from 'react-router-dom'
 import {
@@ -73,6 +71,12 @@ const urgencyOptions = ['All', 'Low', 'Medium', 'High', 'Urgent'] as const
 const dateOptions = ['All', 'Today', 'Tomorrow'] as const
 const neighborhoodAreas = ['Parel', 'Lower Parel', 'Dadar', 'Sion', 'Matunga', 'Matunga East'] as const
 const RequestMap = lazy(() => import('./components/NeighborhoodRequestMap'))
+
+function formatApproximateLocation(location: string) {
+  return neighborhoodAreas.includes(location as (typeof neighborhoodAreas)[number])
+    ? `Near ${location}`
+    : 'Nearby'
+}
 
 function toHelpRequest(record: BackendRequest, currentUserId: string): HelpRequest {
   const categoryAliases: Record<string, RequestCategory> = {
