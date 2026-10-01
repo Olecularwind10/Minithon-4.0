@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -34,48 +34,60 @@ import {
   type ProfileBundle,
   type RequestDraft,
 } from './lib/api'
+import { getCurrentLocation } from './services/locationService'
+import { MUMBAI_FALLBACK_LOCATION, type LocationCoordinates } from './types/location'
+import {
+  REQUEST_CATEGORIES,
+  type EnrichedHelpRequest,
+  type HelpRequest as LocationHelpRequest,
+  type RequestCategory,
+  type RequestStatus,
+  type RequestUrgency,
+} from './types/request'
+import { enrichRequests, filterRequests, getNearbyRequests, formatRequestDate, RADIUS_OPTIONS, type RadiusKm } from './utils/locationFilters'
 
-export type HelpRequest = {
-  id: string
-  title: string
-  description: string
-  category: string
-  when: string
-  location: string
-  distance: string
-  name: string
-  avatar: string
-  image: string
-  status: string
+export type HelpRequest = Omit<LocationHelpRequest, 'status'> & {
+  status: RequestStatus
   isMine: boolean
   offeredByMe: boolean
+  matched: boolean
 }
+type AppEnrichedRequest = EnrichedHelpRequest & Pick<HelpRequest, 'isMine' | 'offeredByMe' | 'matched'>
 
-const categories = ['All', 'Groceries', 'Rides', 'Around home', 'Pet care']
+const categories = ['All', ...REQUEST_CATEGORIES]
+const urgencyOptions = ['All', 'Low', 'Medium', 'High', 'Urgent'] as const
+const dateOptions = ['All', 'Today', 'Tomorrow'] as const
 const RequestMap = lazy(() => import('./components/NeighborhoodRequestMap'))
 
 function toHelpRequest(record: HelpRequestRecord): HelpRequest {
-  const scheduledDate = record.date
-    ? new Date(`${record.date}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-    : ''
-  const scheduledTime = record.time
-    ? new Date(`1970-01-01T${record.time}:00`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-    : ''
+  const categoryAliases: Record<string, RequestCategory> = {
+    rides: 'Transportation',
+    'around home': 'Around Home',
+    'pet care': 'Pet Care',
+  }
+  const category = categoryAliases[record.category.toLowerCase()]
+    ?? REQUEST_CATEGORIES.find((item) => item.toLowerCase() === record.category.toLowerCase())
+    ?? 'Other'
+  const status: RequestStatus = record.status === 'open' ? 'Open' : record.status === 'matched' ? 'In Progress' : 'Completed'
 
   return {
     id: record.id,
     title: record.title,
     description: record.description,
-    category: record.category,
-    when: [scheduledDate, scheduledTime].filter(Boolean).join(' at ') || 'Schedule to be arranged',
-    location: record.area || 'Nearby',
-    distance: 'nearby',
+    category,
+    latitude: record.latitude ?? MUMBAI_FALLBACK_LOCATION.latitude,
+    longitude: record.longitude ?? MUMBAI_FALLBACK_LOCATION.longitude,
+    urgency: (record.urgency.charAt(0).toUpperCase() + record.urgency.slice(1)) as RequestUrgency,
+    date: record.date ?? record.createdAt.slice(0, 10),
+    time: record.time ?? '12:00',
+    status,
     name: record.requester.name,
     avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
     image: '',
-    status: record.status,
+    locationLabel: record.area || 'Nearby',
     isMine: record.isMine,
     offeredByMe: record.offeredByMe,
+    matched: record.status === 'matched',
   }
 }
 
@@ -208,7 +220,7 @@ function RequestCard({
   offered,
   onOffer,
 }: {
-  request: HelpRequest
+  request: AppEnrichedRequest
   offered: boolean
   onOffer: (id: string) => void
 }) {
@@ -231,9 +243,9 @@ function RequestCard({
         {request.image && <img src={request.image} alt="" className="size-[76px] shrink-0 rounded-[16px] object-cover sm:size-[92px]" loading="lazy" />}
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3.5 text-xs font-medium text-muted">
-        <span className="inline-flex items-center gap-1.5"><Clock3 size={14} />{request.when}</span>
-        <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{request.distance} away</span>
-        <span>{request.location}</span>
+        <span className="inline-flex items-center gap-1.5"><Clock3 size={14} />{formatRequestDate(request.date, request.time)}</span>
+        <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{request.distanceKm.toFixed(1)} km away</span>
+        <span>{request.locationLabel}</span>
       </div>
       <button
         type="button"
@@ -242,7 +254,7 @@ function RequestCard({
         className={`mt-4 inline-flex min-h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-colors active:scale-[0.98] ${offered || request.isMine ? 'bg-accent-soft text-accent' : 'bg-action text-white hover:opacity-90'}`}
       >
         {offered || request.isMine ? <Check size={16} /> : <HeartHandshake size={16} />}
-        {request.isMine ? request.status === 'matched' ? 'Helper found' : 'Your request' : offered ? 'Matched' : 'I can help'}
+        {request.isMine ? request.matched ? 'Helper found' : 'Your request' : offered ? 'Matched' : 'I can help'}
       </button>
     </article>
   )
@@ -259,7 +271,7 @@ function HomePage({
   loading,
   error,
 }: {
-  requests: HelpRequest[]
+  requests: AppEnrichedRequest[]
   offers: Record<string, boolean>
   onOffer: (id: string) => void
   notice: string
@@ -279,7 +291,7 @@ function HomePage({
       )}
       <section className="mb-6 flex items-end justify-between gap-3">
         <div>
-          <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-accent"><MapPin size={15} /> Cedar Grove</p>
+          <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-accent"><MapPin size={15} /> Mumbai, Maharashtra</p>
           <h1 className="mt-1 text-[30px] font-bold leading-tight tracking-[-0.8px] text-ink sm:text-[36px]">Morning, {userName.split(' ')[0]}</h1>
           <p className="mt-1.5 text-sm text-muted sm:text-base">A few good neighbors are close by.</p>
         </div>
@@ -331,12 +343,14 @@ function HomePage({
 
 function DiscoverPage({
   requests,
+  userLocation,
   offers,
   onOffer,
   loading,
   error,
 }: {
   requests: HelpRequest[]
+  userLocation: LocationCoordinates | null
   offers: Record<string, boolean>
   onOffer: (id: string) => void
   loading: boolean
@@ -344,11 +358,21 @@ function DiscoverPage({
 }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
-  const visibleRequests = requests.filter((request) => {
-    const matchesCategory = category === 'All' || request.category === category
-    const searchable = `${request.title} ${request.description} ${request.location} ${request.name}`.toLowerCase()
-    return matchesCategory && searchable.includes(query.toLowerCase().trim())
-  })
+  const [urgency, setUrgency] = useState('All')
+  const [date, setDate] = useState('All')
+  const [radiusKm, setRadiusKm] = useState<RadiusKm>(5)
+  const [searchedRequestIds, setSearchedRequestIds] = useState<string[] | null>(null)
+  const activeLocation = userLocation ?? MUMBAI_FALLBACK_LOCATION
+  const nearbyRequests = useMemo(() => getNearbyRequests(requests, activeLocation, radiusKm), [requests, activeLocation, radiusKm])
+  const visibleRequests = useMemo(() => filterRequests(
+    searchedRequestIds ? nearbyRequests.filter((request) => searchedRequestIds.includes(request.id)) : nearbyRequests,
+    {
+      category: category as RequestCategory | 'All',
+      urgency: urgency as RequestUrgency | 'All',
+      date: date as 'Today' | 'Tomorrow' | 'All',
+      query,
+    },
+  ), [nearbyRequests, searchedRequestIds, category, urgency, date, query])
 
   return (
     <div className="page-enter">
@@ -369,16 +393,29 @@ function DiscoverPage({
           </button>
         ))}
       </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <select aria-label="Filter by radius" value={radiusKm} onChange={(event) => { setRadiusKm(Number(event.target.value) as RadiusKm); setSearchedRequestIds(null) }} className="field-input min-h-10 py-2 text-sm">
+          {RADIUS_OPTIONS.map((radius) => <option key={radius} value={radius}>{radius} km radius</option>)}
+        </select>
+        <select aria-label="Filter by urgency" value={urgency} onChange={(event) => setUrgency(event.target.value)} className="field-input min-h-10 py-2 text-sm">
+          {urgencyOptions.map((item) => <option key={item} value={item}>{item === 'All' ? 'All urgency' : item}</option>)}
+        </select>
+        <select aria-label="Filter by date" value={date} onChange={(event) => setDate(event.target.value)} className="field-input min-h-10 py-2 text-sm">
+          {dateOptions.map((item) => <option key={item} value={item}>{item === 'All' ? 'Any date' : item}</option>)}
+        </select>
+      </div>
       <div className="mt-6 grid items-start gap-5 lg:grid-cols-[1fr_1.08fr]">
         <div className="lg:sticky lg:top-5">
           <Suspense fallback={<div role="status" className="map-loading">Loading neighborhood map</div>}>
-            <RequestMap requests={visibleRequests} />
+            {userLocation ? (
+              <RequestMap key={`${userLocation.latitude}-${userLocation.longitude}`} requests={visibleRequests} userLocation={userLocation} onSearchThisArea={setSearchedRequestIds} />
+            ) : <div role="status" className="map-loading">Finding your live location</div>}
           </Suspense>
         </div>
         <section>
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-lg font-bold text-ink">Requests near you</h2>
-            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted"><MapPin size={14} /> Cedar Grove</span>
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted"><MapPin size={14} /> Mumbai, Maharashtra</span>
           </div>
           {loading ? (
             <p role="status" className="text-sm text-muted">Loading requests…</p>
@@ -403,7 +440,7 @@ function DiscoverPage({
   )
 }
 
-function CreateRequestPage({ onCreate }: { onCreate: (request: RequestDraft) => Promise<void> }) {
+function CreateRequestPage({ onCreate, userLocation }: { onCreate: (request: RequestDraft) => Promise<void>; userLocation: LocationCoordinates | null }) {
   const navigate = useNavigate()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -426,6 +463,9 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: RequestDraft) => 
       area: location.trim(),
       date,
       time,
+      latitude: userLocation?.latitude ?? MUMBAI_FALLBACK_LOCATION.latitude,
+      longitude: userLocation?.longitude ?? MUMBAI_FALLBACK_LOCATION.longitude,
+      urgency: 'medium',
       })
       navigate('/')
     } catch (error) {
@@ -553,6 +593,7 @@ function ProfilePage({ profile, loading, error }: { profile: ProfileBundle | nul
 function App() {
   const offline = useOfflineStatus()
   const [requests, setRequests] = useState<HelpRequest[]>([])
+  const [userLocation, setUserLocation] = useState<LocationCoordinates | null>(null)
   const [offers, setOffers] = useState<Record<string, boolean>>({})
   const [showActions, setShowActions] = useState(false)
   const [notice, setNotice] = useState('')
@@ -576,6 +617,12 @@ function App() {
         if (active) setRequestsError(error instanceof Error ? error.message : 'Could not load requests')
       })
       .finally(() => { if (active) setRequestsLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    getCurrentLocation().then((location) => { if (active) setUserLocation(location) })
     return () => { active = false }
   }, [])
 
@@ -613,17 +660,19 @@ function App() {
   }
 
   const userName = profile?.trust.user.name ?? 'Neighbor'
+  const activeLocation = userLocation ?? MUMBAI_FALLBACK_LOCATION
+  const enrichedRequests = useMemo(() => enrichRequests(requests, activeLocation), [requests, activeLocation])
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <Header offline={offline} />
       <main className="app-main">
         <Routes>
-          <Route path="/" element={<HomePage requests={requests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} userName={userName} loading={requestsLoading} error={requestsError} />} />
-          <Route path="/discover" element={<DiscoverPage requests={requests} offers={offers} onOffer={offerHelp} loading={requestsLoading} error={requestsError} />} />
-          <Route path="/create" element={<CreateRequestPage onCreate={createRequest} />} />
+          <Route path="/" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} userName={userName} loading={requestsLoading} error={requestsError} />} />
+          <Route path="/discover" element={<DiscoverPage requests={requests} userLocation={userLocation} offers={offers} onOffer={offerHelp} loading={requestsLoading} error={requestsError} />} />
+          <Route path="/create" element={<CreateRequestPage onCreate={createRequest} userLocation={userLocation} />} />
           <Route path="/profile" element={<ProfilePage profile={profile} loading={profileLoading} error={profileError} />} />
-          <Route path="*" element={<HomePage requests={requests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} userName={userName} loading={requestsLoading} error={requestsError} />} />
+          <Route path="*" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} userName={userName} loading={requestsLoading} error={requestsError} />} />
         </Routes>
       </main>
       <BottomNavigation onOpenActions={() => setShowActions(true)} />

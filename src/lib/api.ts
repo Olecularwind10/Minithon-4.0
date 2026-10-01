@@ -8,6 +8,9 @@ export type HelpRequestRecord = {
   area: string
   date: string | null
   time: string | null
+  latitude: number | null
+  longitude: number | null
+  urgency: string
   status: string
   createdAt: string
   requester: { id: string; name: string }
@@ -22,6 +25,9 @@ export type RequestDraft = {
   area: string
   date: string
   time: string
+  latitude: number
+  longitude: number
+  urgency: string
 }
 
 export type TrustProfile = {

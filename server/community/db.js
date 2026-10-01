@@ -146,3 +146,6 @@ ensureColumn('help_requests', 'completed_at', 'TEXT');
 ensureColumn('help_requests', 'area', 'TEXT');
 ensureColumn('help_requests', 'date', 'TEXT');
 ensureColumn('help_requests', 'time', 'TEXT');
+ensureColumn('help_requests', 'latitude', 'REAL');
+ensureColumn('help_requests', 'longitude', 'REAL');
+ensureColumn('help_requests', 'urgency', "TEXT NOT NULL DEFAULT 'medium'");

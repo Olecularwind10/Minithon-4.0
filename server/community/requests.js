@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from './db.js';
-import { HttpError, clean, earliestEventDate, firstName, isDate, isTime, nowIso, paging, uid } from './util.js';
+import { HttpError, clean, earliestEventDate, firstName, isDate, isTime, nowIso, paging, parseCoords, uid } from './util.js';
 import { isBlocked } from './safety.js';
 
 const router = Router();
@@ -14,6 +14,9 @@ function present(row, userId) {
     area: row.area ?? '',
     date: row.date ?? null,
     time: row.time ?? null,
+    latitude: row.latitude ?? null,
+    longitude: row.longitude ?? null,
+    urgency: row.urgency ?? 'medium',
     status: row.status,
     createdAt: row.created_at,
     requester: { id: row.requester_id, name: firstName(row.requester_name) ?? 'Neighbor' },
@@ -57,19 +60,22 @@ router.post('/', (req, res) => {
   const area = clean(body.area, 100);
   const date = body.date || null;
   const time = body.time || null;
+  const urgency = clean(body.urgency || 'medium', 20).toLowerCase();
+  const { lat, lng } = parseCoords(body.latitude, body.longitude);
   if (title.length < 3) throw new HttpError(400, 'Title must be at least 3 characters');
   if (!description) throw new HttpError(400, 'Description is required');
   if (!category) throw new HttpError(400, 'Category is required');
   if (!area) throw new HttpError(400, 'Area is required');
   if (date && (!isDate(date) || date < earliestEventDate())) throw new HttpError(400, 'date must be today or later in YYYY-MM-DD format');
   if (time && !isTime(time)) throw new HttpError(400, 'time must be HH:MM (24h)');
+  if (!['low', 'medium', 'high', 'urgent'].includes(urgency)) throw new HttpError(400, 'Invalid urgency');
 
   const id = uid();
   const createdAt = nowIso();
   db.prepare(
-    `INSERT INTO help_requests (id, requester_id, title, description, category, status, created_at, area, date, time)
-     VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`
-  ).run(id, req.user.id, title, description, category, createdAt, area, date, time);
+     `INSERT INTO help_requests (id, requester_id, title, description, category, status, created_at, area, date, time, latitude, longitude, urgency)
+      VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, req.user.id, title, description, category, createdAt, area, date, time, lat, lng, urgency);
   const row = db.prepare(`${SELECT_SQL} WHERE r.id = ?`).get(id);
   res.status(201).json(present(row, req.user.id));
 });

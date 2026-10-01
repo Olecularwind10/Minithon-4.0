@@ -20,6 +20,8 @@ npm run dev
 
 The frontend proxies `/api` to `http://localhost:4000`. Local API requests use the seeded `u_asha` identity by default; set `VITE_API_USER_ID` before starting Vite to use another seeded user.
 
+The authenticated backend added under `server/` can be started separately from the project root with `npm run backend:dev` (port 5000). It uses its own SQLite database at `server/db/dev.sqlite` unless `SQLITE_PATH` is set.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

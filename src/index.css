@@ -217,7 +217,7 @@ select:focus-visible {
 }
 
 .discover-map {
-  height: 310px;
+  height: 390px;
 }
 
 .map-loading {
@@ -250,17 +250,87 @@ select:focus-visible {
   transform: rotate(45deg);
 }
 
+.user-location-pin {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 3px solid white;
+  border-radius: 50%;
+  color: white;
+  background: #245846;
+  box-shadow: 0 3px 12px rgb(39 41 34 / 28%);
+}
+
+.search-area-button {
+  position: absolute;
+  z-index: 5;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.map-request-popup-shell {
+  width: min(260px, calc(100vw - 72px));
+  max-width: 260px;
+  padding: 14px 15px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 22%);
+}
+
+.map-request-popup-shell > button {
+  top: 9px;
+  right: 9px;
+  color: var(--muted);
+  background: var(--surface-soft);
+}
+
+.map-request-popup-shell > button:hover {
+  color: var(--ink);
+  background: var(--line);
+}
+
 .map-request-popup {
   display: grid;
-  gap: 5px;
-  max-width: 210px;
+  gap: 7px;
+  max-width: 100%;
   color: var(--ink);
   font-family: 'DM Sans Variable', sans-serif;
   font-size: 13px;
   line-height: 1.35;
 }
 
-.map-request-popup span {
+.map-request-popup-title {
+  display: block;
+  padding-right: 24px;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.map-request-popup-category {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--accent-text) !important;
+  background: var(--accent-soft);
+  font-size: 10px !important;
+  font-weight: 750;
+}
+
+.map-request-popup-details {
+  display: grid;
+  gap: 3px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.map-request-popup-details span {
   color: var(--muted);
   font-size: 11px;
 }
@@ -316,12 +386,12 @@ select:focus-visible {
 
 @media (min-width: 1024px) {
   .discover-map {
-    height: min(62vh, 620px);
-    min-height: 460px;
+    height: min(68vh, 680px);
+    min-height: 520px;
   }
 
   .map-loading {
-    min-height: 460px;
+    min-height: 520px;
   }
 }
 

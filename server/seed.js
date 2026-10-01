@@ -36,15 +36,15 @@ for (const [id, req, helper, title, cat, status] of helps) {
 }
 
 const openRequests = [
-  ['rq_demo_1', 'u_meera', 'Could someone water my plants?', 'I will be away for a few days and could use help with my balcony plants.', 'Around home', 'Andheri East', day(1), '17:30'],
-  ['rq_demo_2', 'u_priya', 'A quick grocery pickup', 'Could someone pick up a few things from the local shop?', 'Groceries', 'Andheri East', day(2), '12:00'],
-  ['rq_demo_3', 'u_ravi', 'Help carrying a bookcase', 'I could use one extra pair of hands moving a bookcase upstairs.', 'Around home', 'Andheri East', day(3), '10:00'],
+  ['rq_demo_1', 'u_meera', 'Could someone water my plants?', 'I will be away for a few days and could use help with my balcony plants.', 'Around Home', 'Parel', day(1), '17:30', 19.0178, 72.8478, 'medium'],
+  ['rq_demo_2', 'u_priya', 'A quick grocery pickup', 'Could someone pick up a few things from the local shop?', 'Groceries', 'Dadar', day(2), '12:00', 19.0222, 72.8553, 'low'],
+  ['rq_demo_3', 'u_ravi', 'Help carrying a bookcase', 'I could use one extra pair of hands moving a bookcase upstairs.', 'Moving', 'Lower Parel', day(3), '10:00', 19.0064, 72.8296, 'high'],
 ];
-for (const [id, requesterId, title, description, category, area, date, time] of openRequests) {
+for (const [id, requesterId, title, description, category, area, date, time, latitude, longitude, urgency] of openRequests) {
   db.prepare(
-    `INSERT OR REPLACE INTO help_requests (id, requester_id, selected_helper_id, title, description, category, status, created_at, completed_at, area, date, time)
-     VALUES (?, ?, NULL, ?, ?, ?, 'open', ?, NULL, ?, ?, ?)`
-  ).run(id, requesterId, title, description, category, now, area, date, time);
+    `INSERT OR REPLACE INTO help_requests (id, requester_id, selected_helper_id, title, description, category, status, created_at, completed_at, area, date, time, latitude, longitude, urgency)
+     VALUES (?, ?, NULL, ?, ?, ?, 'open', ?, NULL, ?, ?, ?, ?, ?, ?)`
+  ).run(id, requesterId, title, description, category, now, area, date, time, latitude, longitude, urgency);
 }
 
 const ratings = [

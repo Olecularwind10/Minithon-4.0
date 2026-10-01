@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
   server: {
+    allowedHosts: ['alessandro-necessitous-leandro.ngrok-free.dev'],
     proxy: {
       '/api': {
         target: 'http://localhost:4000',

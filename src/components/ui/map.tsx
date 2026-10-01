@@ -2093,7 +2093,8 @@ function buildArcCoordinates(
   const [x0, y0] = from;
   const [xTo, y2] = to;
   // Unwrap the destination longitude so |dx| <= 180. This makes arcs that
-  // straddle the antimeridian (e.g. Tokyo -> San Francisco) bow the short way
+  // straddle the antimeridian; when drawing great-circle routes, the shortest path
+  // may cross the antimeridian even for regional examples such as Mumbai -> Bengaluru.
   // across the Pacific instead of the long way around the globe. Resulting
   // longitudes may fall outside [-180, 180]; MapLibre renders them correctly
   // on the globe projection, and on mercator when world copies are enabled.
