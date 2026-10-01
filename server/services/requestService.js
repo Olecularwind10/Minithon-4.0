@@ -18,11 +18,19 @@ function normalizeRequest(row) {
     ...row,
     status: row.status || 'open',
     reasons: parseJson(row.reasons, []),
+    requesterName: row.requester_name || 'Neighbor',
+    respondedByMe: Boolean(row.responded_by_me),
   };
 }
 
 async function getRequestById(id) {
-  const result = await query('SELECT * FROM help_requests WHERE id = ?', [id]);
+  const result = await query(
+    `SELECT r.*, u.name AS requester_name
+     FROM help_requests r
+     LEFT JOIN users u ON u.id = r.requester_id
+     WHERE r.id = ?`,
+    [id],
+  );
   return normalizeRequest(result.rows[0] || null);
 }
 
@@ -68,20 +76,24 @@ export async function createRequest(input = {}, requesterId) {
 }
 
 export async function listRequests(filters = {}) {
-  let sql = 'SELECT * FROM help_requests';
+  let sql = `
+    SELECT r.*, u.name AS requester_name,
+      EXISTS (SELECT 1 FROM matches m WHERE m.request_id = r.id AND m.helper_id = ?) AS responded_by_me
+    FROM help_requests r
+    LEFT JOIN users u ON u.id = r.requester_id`;
   const conditions = [];
-  const params = [];
+  const params = [filters.currentUserId || ''];
 
   if (filters.requesterId) {
-    conditions.push('requester_id = ?');
+    conditions.push('r.requester_id = ?');
     params.push(filters.requesterId);
   }
   if (filters.status) {
-    conditions.push('status = ?');
+    conditions.push('r.status = ?');
     params.push(filters.status);
   }
   if (filters.category) {
-    conditions.push('category = ?');
+    conditions.push('r.category = ?');
     params.push(filters.category);
   }
 
@@ -89,9 +101,38 @@ export async function listRequests(filters = {}) {
     sql += ` WHERE ${conditions.join(' AND ')}`;
   }
 
-  sql += ' ORDER BY created_at DESC';
+  sql += ' ORDER BY r.created_at DESC';
   const result = await query(sql, params);
   return (result.rows || []).map(normalizeRequest);
+}
+
+export async function listRequestResponses(requestId, requesterId) {
+  const request = await getRequestById(requestId);
+  if (!request) throw new Error('Request not found.');
+  if (request.requester_id !== requesterId) {
+    throw new Error('Only the requester can view responses.');
+  }
+
+  const result = await query(
+    `SELECT m.*, u.name AS helper_name, u.area AS helper_area, u.rating AS helper_rating,
+            u.community_verified AS helper_community_verified
+     FROM matches m
+     LEFT JOIN users u ON u.id = m.helper_id
+     WHERE m.request_id = ?
+     ORDER BY m.total_score DESC, m.created_at ASC`,
+    [requestId],
+  );
+  return (result.rows || []).map((row) => ({
+    ...row,
+    reasons: parseJson(row.reasons, []),
+    helper: {
+      id: row.helper_id,
+      name: row.helper_name || 'Neighbor',
+      area: row.helper_area || '',
+      rating: Number(row.helper_rating || 0),
+      communityVerified: Boolean(row.helper_community_verified),
+    },
+  }));
 }
 
 export async function updateRequest(id, requesterId, updates = {}) {

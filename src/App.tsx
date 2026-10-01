@@ -25,39 +25,91 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router-dom'
-import LoginPage from './components/LoginPage'
-import SignupPage from './components/SignupPage'
 import {
-  logoutUser,
-  registerUser,
-  resendRegistrationCode,
-  restoreSession,
-  verifyRegistrationEmail,
+  acceptRequestHelper,
+  cancelRequest,
+  clearAuthSession,
+  completeRequest,
+  createRequest,
+  deleteRequest,
+  fetchCurrentUser,
+  fetchRequestResponses,
+  fetchRequests,
+  logoutAccount,
+  readAuthSession,
+  respondToRequest,
+  storeAuthSession,
+  updateRequest,
+  type AuthSession,
   type AuthUser,
-  type RegistrationDetails,
-} from './services/authService'
+  type BackendRequest,
+  type RequestResponse,
+  type RequestDraft,
+} from './lib/api'
+import AuthScreen from './components/AuthScreen'
+import AccountPage from './components/AccountPage'
 import { getCurrentLocation } from './services/locationService'
-import { getRequests } from './services/requestService'
 import { MUMBAI_FALLBACK_LOCATION, type LocationCoordinates } from './types/location'
 import {
   REQUEST_CATEGORIES,
   type EnrichedHelpRequest,
-  type HelpRequest,
+  type HelpRequest as LocationHelpRequest,
   type RequestCategory,
+  type RequestStatus,
   type RequestUrgency,
 } from './types/request'
 import { enrichRequests, filterRequests, getNearbyRequests, formatRequestDate, RADIUS_OPTIONS, type RadiusKm } from './utils/locationFilters'
 
-const categories = ['All', ...REQUEST_CATEGORIES] as const
+export type HelpRequest = Omit<LocationHelpRequest, 'status'> & {
+  status: RequestStatus
+  isMine: boolean
+  offeredByMe: boolean
+  matched: boolean
+}
+type AppEnrichedRequest = EnrichedHelpRequest & Pick<HelpRequest, 'isMine' | 'offeredByMe' | 'matched'>
+
+const categories = ['All', ...REQUEST_CATEGORIES]
 const urgencyOptions = ['All', 'Low', 'Medium', 'High', 'Urgent'] as const
 const dateOptions = ['All', 'Today', 'Tomorrow'] as const
 const neighborhoodAreas = ['Parel', 'Lower Parel', 'Dadar', 'Sion', 'Matunga', 'Matunga East'] as const
 const RequestMap = lazy(() => import('./components/NeighborhoodRequestMap'))
 
-function formatApproximateLocation(location: string) {
-  return neighborhoodAreas.includes(location as (typeof neighborhoodAreas)[number])
-    ? `Near ${location}`
-    : 'Nearby'
+function toHelpRequest(record: BackendRequest, currentUserId: string): HelpRequest {
+  const categoryAliases: Record<string, RequestCategory> = {
+    rides: 'Transportation',
+    'around home': 'Around Home',
+    'pet care': 'Pet Care',
+    errands: 'Groceries',
+    'moving help': 'Moving',
+    'laptop repair': 'Technical',
+  }
+  const category = categoryAliases[record.category.toLowerCase()]
+    ?? REQUEST_CATEGORIES.find((item) => item.toLowerCase() === record.category.toLowerCase())
+    ?? 'Other'
+  const status: RequestStatus = record.status === 'open' ? 'Open'
+    : record.status === 'responses' ? 'Responses'
+      : ['accepted', 'in_progress'].includes(record.status) ? 'In Progress'
+        : record.status === 'cancelled' ? 'Cancelled' : 'Completed'
+
+  return {
+    id: record.id,
+    title: record.title,
+    description: record.description,
+    category,
+    latitude: record.latitude ?? MUMBAI_FALLBACK_LOCATION.latitude,
+    longitude: record.longitude ?? MUMBAI_FALLBACK_LOCATION.longitude,
+    urgency: (record.urgency.charAt(0).toUpperCase() + record.urgency.slice(1)) as RequestUrgency,
+    date: record.preferred_date ?? record.created_at.slice(0, 10),
+    time: record.preferred_time ?? '12:00',
+    status,
+    name: record.requesterName || record.requester_name || 'Neighbor',
+    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+    image: '',
+    locationLabel: record.area || 'Nearby',
+    isMine: record.requester_id === currentUserId,
+    offeredByMe: Boolean(record.respondedByMe ?? record.responded_by_me),
+    matched: Boolean(record.selected_helper_id),
+  }
 }
 
 function useOfflineStatus() {
@@ -188,11 +240,41 @@ function RequestCard({
   request,
   offered,
   onOffer,
+  onEdit,
+  onDelete,
+  onCancel,
+  onComplete,
+  onAcceptHelper,
 }: {
-  request: EnrichedHelpRequest
+  request: AppEnrichedRequest
   offered: boolean
   onOffer: (id: string) => void
+  onEdit: (request: HelpRequest) => void
+  onDelete: (id: string) => void
+  onCancel: (id: string) => void
+  onComplete: (id: string) => void
+  onAcceptHelper: (requestId: string, helperId: string) => void
 }) {
+  const [responses, setResponses] = useState<RequestResponse[] | null>(null)
+  const [responsesLoading, setResponsesLoading] = useState(false)
+  const [responsesError, setResponsesError] = useState('')
+
+  async function toggleResponses() {
+    if (responses) {
+      setResponses(null)
+      return
+    }
+    setResponsesLoading(true)
+    setResponsesError('')
+    try {
+      setResponses(await fetchRequestResponses(request.id))
+    } catch (error) {
+      setResponsesError(error instanceof Error ? error.message : 'Could not load helper responses')
+    } finally {
+      setResponsesLoading(false)
+    }
+  }
+
   return (
     <article className="request-card rounded-[22px] border border-line bg-surface p-4 sm:p-5">
       <div className="flex items-start gap-3.5">
@@ -216,15 +298,25 @@ function RequestCard({
         <span className="inline-flex items-center gap-1.5"><Clock3 size={14} />{formatRequestDate(request.date, request.time)}</span>
         <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{request.distanceKm.toFixed(1)} km away, {formatApproximateLocation(request.locationLabel)}</span>
       </div>
-      <button
-        type="button"
-        onClick={() => onOffer(request.id)}
-        disabled={offered}
-        className={`mt-4 inline-flex min-h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-colors active:scale-[0.98] ${offered ? 'bg-accent-soft text-accent' : 'bg-action text-white hover:opacity-90'}`}
-      >
-        {offered ? <Check size={16} /> : <HeartHandshake size={16} />}
-        {offered ? 'Offer sent' : 'I can help'}
-      </button>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {!request.isMine && request.status === 'Open' && <button type="button" onClick={() => onOffer(request.id)} disabled={offered} className={`inline-flex min-h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold ${offered ? 'bg-accent-soft text-accent' : 'bg-action text-white hover:opacity-90'}`}>
+          {offered ? <Check size={16} /> : <HeartHandshake size={16} />}{offered ? 'Response sent' : 'I can help'}
+        </button>}
+        {request.isMine && request.status === 'Open' && <button type="button" onClick={() => onEdit(request)} className="min-h-10 rounded-full border border-line px-4 text-sm font-semibold">Edit</button>}
+        {request.isMine && ['Open', 'Responses'].includes(request.status) && <button type="button" onClick={toggleResponses} disabled={responsesLoading} className="min-h-10 rounded-full border border-line px-4 text-sm font-semibold">{responsesLoading ? 'Loading…' : responses ? 'Hide responses' : 'View responses'}</button>}
+        {request.isMine && ['Open', 'Responses'].includes(request.status) && <button type="button" onClick={() => onCancel(request.id)} className="min-h-10 rounded-full border border-line px-4 text-sm font-semibold">Cancel</button>}
+        {request.isMine && request.status === 'Open' && <button type="button" onClick={() => onDelete(request.id)} className="min-h-10 rounded-full border border-line px-4 text-sm font-semibold text-action">Delete</button>}
+        {request.isMine && request.status === 'In Progress' && <button type="button" onClick={() => onComplete(request.id)} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-action px-4 text-sm font-semibold text-white"><Check size={16} /> Mark complete</button>}
+        {request.isMine && request.status === 'Completed' && <span className="inline-flex min-h-10 items-center gap-2 rounded-full bg-accent-soft px-4 text-sm font-semibold text-accent"><Check size={16} /> Completed</span>}
+      </div>
+      {responsesError && <p role="alert" className="mt-3 text-sm text-action">{responsesError}</p>}
+      {responses && <div className="mt-4 border-t border-line pt-3">
+        <h4 className="text-sm font-bold text-ink">Neighbors who responded</h4>
+        {responses.length ? <div className="mt-2 divide-y divide-line">{responses.map((response) => <div key={response.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div><p className="text-sm font-semibold text-ink">{response.helper.name}</p><p className="text-xs text-muted">{response.helper.area || 'Nearby'} · {response.helper.communityVerified ? 'Community verified' : 'Not community verified'}</p></div>
+          {!request.matched && <button type="button" onClick={() => onAcceptHelper(request.id, response.helper_id)} className="min-h-9 rounded-full bg-action px-4 text-xs font-bold text-white">Accept helper</button>}
+        </div>)}</div> : <p className="mt-2 text-sm text-muted">No one has responded yet.</p>}
+      </div>}
     </article>
   )
 }
@@ -236,13 +328,29 @@ function HomePage({
   notice,
   onDismissNotice,
   onOfferHelp,
+  onEditRequest,
+  onDeleteRequest,
+  onCancelRequest,
+  onCompleteRequest,
+  onAcceptHelper,
+  userName,
+  loading,
+  error,
 }: {
-  requests: EnrichedHelpRequest[]
+  requests: AppEnrichedRequest[]
   offers: Record<string, boolean>
   onOffer: (id: string) => void
   notice: string
   onDismissNotice: () => void
   onOfferHelp: () => void
+  onEditRequest: (request: HelpRequest) => void
+  onDeleteRequest: (id: string) => void
+  onCancelRequest: (id: string) => void
+  onCompleteRequest: (id: string) => void
+  onAcceptHelper: (requestId: string, helperId: string) => void
+  userName: string
+  loading: boolean
+  error: string
 }) {
   return (
     <div className="page-enter">
@@ -255,7 +363,7 @@ function HomePage({
       <section className="mb-6 flex items-end justify-between gap-3">
         <div>
           <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-accent"><MapPin size={15} /> Mumbai, Maharashtra</p>
-          <h1 className="mt-1 text-[30px] font-bold leading-tight tracking-[-0.8px] text-ink sm:text-[36px]">Morning, Maya</h1>
+          <h1 className="mt-1 text-[30px] font-bold leading-tight tracking-[-0.8px] text-ink sm:text-[36px]">Morning, {userName.split(' ')[0]}</h1>
           <p className="mt-1.5 text-sm text-muted sm:text-base">A few good neighbors are close by.</p>
         </div>
         <Link to="/profile" aria-label="View your profile" className="hidden size-11 shrink-0 overflow-hidden rounded-full ring-2 ring-surface sm:block">
@@ -292,8 +400,11 @@ function HomePage({
           <Link to="/discover" className="inline-flex shrink-0 items-center gap-1 text-sm font-bold text-accent no-underline">See all <ArrowRight size={16} /></Link>
         </div>
         <div className="grid gap-3.5">
-          {requests.slice(0, 2).map((request) => (
-            <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id])} onOffer={onOffer} />
+          {loading && <p role="status" className="text-sm text-muted">Loading nearby requests…</p>}
+          {error && <p role="alert" className="text-sm text-action">{error}</p>}
+          {!loading && !error && requests.length === 0 && <p className="text-sm text-muted">There are no open requests nearby yet.</p>}
+          {!loading && requests.slice(0, 2).map((request) => (
+            <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} />
           ))}
         </div>
       </section>
@@ -306,11 +417,25 @@ function DiscoverPage({
   userLocation,
   offers,
   onOffer,
+  loading,
+  error,
+  onEditRequest,
+  onDeleteRequest,
+  onCancelRequest,
+  onCompleteRequest,
+  onAcceptHelper,
 }: {
   requests: HelpRequest[]
   userLocation: LocationCoordinates | null
   offers: Record<string, boolean>
   onOffer: (id: string) => void
+  loading: boolean
+  error: string
+  onEditRequest: (request: HelpRequest) => void
+  onDeleteRequest: (id: string) => void
+  onCancelRequest: (id: string) => void
+  onCompleteRequest: (id: string) => void
+  onAcceptHelper: (requestId: string, helperId: string) => void
 }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
@@ -319,7 +444,7 @@ function DiscoverPage({
   const [radiusKm, setRadiusKm] = useState<RadiusKm>(5)
   const [searchedRequestIds, setSearchedRequestIds] = useState<string[] | null>(null)
   const activeLocation = userLocation ?? MUMBAI_FALLBACK_LOCATION
-  const nearbyRequests = useMemo(() => getNearbyRequests(requests, activeLocation, radiusKm), [requests, activeLocation, radiusKm])
+  const nearbyRequests = useMemo(() => getNearbyRequests(requests.filter((request) => request.status !== 'Cancelled'), activeLocation, radiusKm), [requests, activeLocation, radiusKm])
   const visibleRequests = useMemo(() => filterRequests(
     searchedRequestIds ? nearbyRequests.filter((request) => searchedRequestIds.includes(request.id)) : nearbyRequests,
     {
@@ -364,10 +489,8 @@ function DiscoverPage({
         <div className="lg:sticky lg:top-5">
           <Suspense fallback={<div role="status" className="map-loading">Loading neighborhood map</div>}>
             {userLocation ? (
-              <RequestMap key={`${userLocation.latitude}-${userLocation.longitude}`} requests={visibleRequests} userLocation={userLocation} onSearchThisArea={(ids) => setSearchedRequestIds(ids)} />
-            ) : (
-              <div role="status" className="map-loading">Finding your live location</div>
-            )}
+              <RequestMap key={`${userLocation.latitude}-${userLocation.longitude}`} requests={visibleRequests} userLocation={userLocation} onSearchThisArea={setSearchedRequestIds} />
+            ) : <div role="status" className="map-loading">Finding your live location</div>}
           </Suspense>
         </div>
         <section>
@@ -375,10 +498,14 @@ function DiscoverPage({
             <h2 className="text-lg font-bold text-ink">Requests near you</h2>
             <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted"><MapPin size={14} /> Mumbai, Maharashtra</span>
           </div>
-          {visibleRequests.length > 0 ? (
+          {loading ? (
+            <p role="status" className="text-sm text-muted">Loading requests…</p>
+          ) : error ? (
+            <p role="alert" className="text-sm text-action">{error}</p>
+          ) : visibleRequests.length > 0 ? (
             <div className="grid gap-3.5">
               {visibleRequests.map((request) => (
-                <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id])} onOffer={onOffer} />
+                <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} />
               ))}
             </div>
           ) : (
@@ -394,35 +521,55 @@ function DiscoverPage({
   )
 }
 
-function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => void }) {
+function CreateRequestPage({ onSave, userLocation, request }: {
+  onSave: (request: RequestDraft, requestId?: string) => Promise<void>
+  userLocation: LocationCoordinates | null
+  request?: HelpRequest
+}) {
   const navigate = useNavigate()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [category, setCategory] = useState<RequestCategory>('Around Home')
+  const [category, setCategory] = useState('Around home')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
-  const [location, setLocation] = useState<(typeof neighborhoodAreas)[number]>('Parel')
+  const [location, setLocation] = useState('Cedar Grove')
+  const [urgency, setUrgency] = useState<RequestUrgency>('Medium')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    setTitle(request?.title ?? '')
+    setDescription(request?.description ?? '')
+    setCategory(request?.category ?? 'Around Home')
+    setDate(request?.date ?? '')
+    setTime(request?.time ?? '')
+    setLocation(request?.locationLabel ?? 'Parel')
+    setUrgency(request?.urgency ?? 'Medium')
+    setSubmitError('')
+  }, [request])
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const newRequest: HelpRequest = {
-      id: crypto.randomUUID(),
+    setSubmitting(true)
+    setSubmitError('')
+    try {
+      await onSave({
       title: title.trim(),
       description: description.trim(),
       category,
-      latitude: MUMBAI_FALLBACK_LOCATION.latitude,
-      longitude: MUMBAI_FALLBACK_LOCATION.longitude,
-      urgency: 'Medium',
-      date,
-      time,
-      status: 'Open',
-      name: 'Maya Patel',
-      avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-      image: '',
-      locationLabel: location.trim(),
+      area: location.trim(),
+      preferredDate: date,
+      preferredTime: time,
+      latitude: userLocation?.latitude ?? MUMBAI_FALLBACK_LOCATION.latitude,
+      longitude: userLocation?.longitude ?? MUMBAI_FALLBACK_LOCATION.longitude,
+      urgency: urgency.toLowerCase(),
+      }, request?.id)
+      navigate('/')
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Could not create your request')
+    } finally {
+      setSubmitting(false)
     }
-    onCreate(newRequest)
-    navigate('/')
   }
 
   return (
@@ -446,11 +593,17 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
           <label>
             <span className="field-label">Category</span>
             <span className="relative block">
-                <select value={category} onChange={(event) => setCategory(event.target.value as RequestCategory)} className="field-input appearance-none pr-10">
-                {categories.filter((item): item is RequestCategory => item !== 'All').map((item) => <option key={item}>{item}</option>)}
+              <select value={category} onChange={(event) => setCategory(event.target.value)} className="field-input appearance-none pr-10">
+                {categories.filter((item) => item !== 'All').map((item) => <option key={item}>{item}</option>)}
               </select>
               <ChevronDown size={17} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted" />
             </span>
+          </label>
+          <label>
+            <span className="field-label">Urgency</span>
+            <select value={urgency} onChange={(event) => setUrgency(event.target.value as RequestUrgency)} className="field-input">
+              <option>Low</option><option>Medium</option><option>High</option>
+            </select>
           </label>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label>
@@ -469,7 +622,7 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
             </label>
           </div>
           <label>
-            <span className="field-label">Nearby Mumbai area</span>
+            <span className="field-label">Nearby location</span>
             <span className="relative block">
               <MapPin size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted" />
                 <select required value={location} onChange={(event) => setLocation(event.target.value as (typeof neighborhoodAreas)[number])} className="field-input pl-11">
@@ -478,154 +631,210 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
             </span>
           </label>
         </div>
-        <button type="submit" className="mt-7 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-action px-5 text-sm font-bold text-white transition-transform active:scale-[0.99]">
-          Post request <ArrowRight size={17} />
+        {submitError && <p role="alert" className="mt-5 text-sm font-semibold text-action">{submitError}</p>}
+        <button type="submit" disabled={submitting} className="mt-7 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-action px-5 text-sm font-bold text-white transition-transform active:scale-[0.99] disabled:opacity-60">
+          {submitting ? 'Saving…' : request ? 'Save changes' : 'Post request'} {!submitting && <ArrowRight size={17} />}
         </button>
       </form>
     </div>
   )
 }
 
-function ProfilePage({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
-  return (
-    <div className="page-enter mx-auto max-w-[680px]">
-      <div className="mb-6">
-        <p className="text-sm font-semibold text-accent">Your neighborhood profile</p>
-        <h1 className="mt-1 text-[30px] font-bold leading-tight tracking-[-0.8px] text-ink sm:text-[36px]">A little about you</h1>
-      </div>
-      <section className="rounded-lg bg-[#0f766e] p-5 text-white shadow-[0_16px_36px_rgba(15,23,42,0.12)] sm:p-7">
-        <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:text-left">
-          <span aria-hidden="true" className="grid size-24 shrink-0 place-items-center rounded-full bg-white text-3xl font-bold text-[#0F172A]">{user.name.slice(0, 1).toUpperCase()}</span>
-          <div>
-            <h2 className="text-[23px] font-bold text-white">{user.name}</h2>
-            <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-white/80"><MapPin size={15} />{user.area || 'Neighborhood not set'}</p>
-            <p className="mt-2 max-w-md break-all text-sm leading-relaxed text-white/85">{user.email}</p>
-          </div>
-        </div>
-        <div className="mt-6 grid gap-3 border-t border-white/20 pt-5 text-sm text-white/90 sm:grid-cols-2">
-          {user.phone && <p>Contact: {user.phone}</p>}
-          {user.address && <p>Address: {user.address}</p>}
-          <p>Email status: {user.emailVerified ? 'Verified' : 'Pending verification'}</p>
-        </div>
-      </section>
-      <section className="section-rule mt-7 pt-6">
-        <div className="flex items-center gap-2"><HeartHandshake size={19} className="text-accent" /><h2 className="text-lg font-bold text-ink">Skills I can share</h2></div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {user.skills.length > 0 ? user.skills.map((skill) => <span key={skill} className="rounded-full bg-accent-soft px-3.5 py-2 text-sm font-semibold text-accent">{skill}</span>) : <p className="text-sm text-muted">Add skills to your profile when you are ready.</p>}
-        </div>
-      </section>
-      <section className="section-rule mt-7 flex flex-col gap-4 pt-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-ink">Sign out</h2>
-          <p className="mt-1 text-sm text-muted">Sign out of this device to protect your account.</p>
-        </div>
-        <button type="button" onClick={onLogout} className="inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-md border border-line bg-surface px-4 text-sm font-semibold text-ink transition-colors hover:bg-surface-soft sm:self-auto">
-          <LogOut size={17} /> Log out
-        </button>
-      </section>
-    </div>
-  )
+function ProfilePage({ user, location, onUserUpdated, onLogout }: {
+  user: AuthUser
+  location: LocationCoordinates
+  onUserUpdated: (user: AuthUser) => void
+  onLogout: () => void
+}) {
+  return <AccountPage user={user} location={location} onUserUpdated={onUserUpdated} onLogout={onLogout} />
 }
 
 function App() {
   const offline = useOfflineStatus()
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
-  const [isCheckingSession, setIsCheckingSession] = useState(true)
-  const [authError, setAuthError] = useState('')
+  const [session, setSession] = useState<AuthSession | null>(() => readAuthSession())
+  const [sessionLoading, setSessionLoading] = useState(() => Boolean(readAuthSession()))
   const [requests, setRequests] = useState<HelpRequest[]>([])
   const [userLocation, setUserLocation] = useState<LocationCoordinates | null>(null)
   const [offers, setOffers] = useState<Record<string, boolean>>({})
   const [showActions, setShowActions] = useState(false)
   const [notice, setNotice] = useState('')
-  const location = useLocation()
+  const [requestsLoading, setRequestsLoading] = useState(false)
+  const [requestsError, setRequestsError] = useState('')
+  const [editingRequest, setEditingRequest] = useState<HelpRequest | undefined>()
   const navigate = useNavigate()
 
   useEffect(() => {
-    let isCurrent = true
-    void restoreSession()
-      .then((user) => {
-        if (!isCurrent) return
-        setAuthUser(user)
-        setAuthError('')
-      })
-      .catch((error: unknown) => {
-        if (!isCurrent) return
-        setAuthError(error instanceof Error ? error.message : 'Could not verify your session.')
-      })
-      .finally(() => {
-        if (isCurrent) setIsCheckingSession(false)
-      })
-    return () => { isCurrent = false }
+    const expireSession = () => {
+      setSession(null)
+      setSessionLoading(false)
+      setRequests([])
+    }
+    window.addEventListener('neighborhood-auth-expired', expireSession)
+    return () => window.removeEventListener('neighborhood-auth-expired', expireSession)
   }, [])
 
   useEffect(() => {
-    if (!authUser) return
-    void getRequests().then(setRequests)
-    void getCurrentLocation().then(setUserLocation)
-  }, [authUser])
+    if (!session) {
+      setSessionLoading(false)
+      return
+    }
+    let active = true
+    fetchCurrentUser()
+      .then(({ user }) => {
+        if (!active) return
+        const restored = { ...session, user }
+        storeAuthSession(restored)
+        setSession(restored)
+      })
+      .catch(() => {
+        if (!active) return
+        clearAuthSession()
+        setSession(null)
+      })
+      .finally(() => { if (active) setSessionLoading(false) })
+    return () => { active = false }
+  }, [session?.token])
 
-  const activeLocation = userLocation ?? MUMBAI_FALLBACK_LOCATION
-  const enrichedRequests = useMemo(() => enrichRequests(requests, activeLocation), [requests, activeLocation])
+  useEffect(() => {
+    let active = true
+    getCurrentLocation().then((location) => { if (active) setUserLocation(location) })
+    return () => { active = false }
+  }, [])
 
-  function offerHelp(id: string) {
-    setOffers((current) => ({ ...current, [id]: true }))
+  useEffect(() => {
+    if (!session) {
+      setRequests([])
+      setOffers({})
+      setRequestsLoading(false)
+      return
+    }
+    let active = true
+    setRequestsLoading(true)
+    setRequestsError('')
+    fetchRequests()
+      .then((records) => {
+        if (!active) return
+        const mapped = records.map((record) => toHelpRequest(record, session.user.id))
+        setRequests(mapped)
+        setOffers(Object.fromEntries(mapped.map((request) => [request.id, request.offeredByMe])))
+      })
+      .catch((error: unknown) => {
+        if (active) setRequestsError(error instanceof Error ? error.message : 'Could not load requests')
+      })
+      .finally(() => { if (active) setRequestsLoading(false) })
+    return () => { active = false }
+  }, [session?.user.id])
+
+  async function refreshRequests() {
+    if (!session) return
+    const records = await fetchRequests()
+    const mapped = records.map((record) => toHelpRequest(record, session.user.id))
+    setRequests(mapped)
+    setOffers(Object.fromEntries(mapped.map((request) => [request.id, request.offeredByMe])))
   }
 
-  function createRequest(request: HelpRequest) {
-    setRequests((current) => [request, ...current])
-    setNotice('Your request is up. A neighbor may be able to help.')
+  async function offerHelp(id: string) {
+    try {
+      await respondToRequest(id)
+      await refreshRequests()
+      setNotice('Your response was sent to the requester.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not respond to request')
+    }
+  }
+
+  async function saveRequest(draft: RequestDraft, requestId?: string) {
+    if (!session) return
+    const record = requestId ? await updateRequest(requestId, draft) : await createRequest(draft)
+    const mapped = toHelpRequest(record, session.user.id)
+    setRequests((current) => requestId
+      ? current.map((request) => request.id === requestId ? mapped : request)
+      : [mapped, ...current])
+    setEditingRequest(undefined)
+    setNotice(requestId ? 'Request updated.' : 'Your request is live.')
+  }
+
+  async function acceptHelper(requestId: string, helperId: string) {
+    try {
+      const updated = await acceptRequestHelper(requestId, helperId)
+      if (session) {
+        const mapped = toHelpRequest(updated, session.user.id)
+        setRequests((current) => current.map((request) => request.id === requestId ? mapped : request))
+      }
+      setNotice('Helper accepted. You can mark the request complete when the help is done.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not accept helper')
+    }
+  }
+
+  async function cancelOwnedRequest(requestId: string) {
+    try {
+      const updated = await cancelRequest(requestId)
+      if (session) setRequests((current) => current.map((request) => request.id === requestId ? toHelpRequest(updated, session.user.id) : request))
+      setNotice('Request cancelled.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not cancel request')
+    }
+  }
+
+  async function completeOwnedRequest(requestId: string) {
+    try {
+      const updated = await completeRequest(requestId)
+      if (session) setRequests((current) => current.map((request) => request.id === requestId ? toHelpRequest(updated, session.user.id) : request))
+      setNotice('Request marked complete.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not complete request')
+    }
+  }
+
+  async function deleteOwnedRequest(requestId: string) {
+    if (!window.confirm('Delete this request? This cannot be undone.')) return
+    try {
+      await deleteRequest(requestId)
+      setRequests((current) => current.filter((request) => request.id !== requestId))
+      setNotice('Request deleted.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not delete request')
+    }
+  }
+
+  async function signOut() {
+    try { await logoutAccount() } catch { /* The local token is cleared even if the server is unavailable. */ }
+    clearAuthSession()
+    setSession(null)
+    setRequests([])
+    setNotice('')
+  }
+
+  function updateUser(user: AuthUser) {
+    setSession((current) => {
+      if (!current) return null
+      const updated = { ...current, user }
+      storeAuthSession(updated)
+      return updated
+    })
   }
 
   function goOfferHelp() {
     navigate('/discover')
   }
 
-  async function handleLogin(user: AuthUser) {
-    setAuthError('')
-    setAuthUser(user)
-    navigate('/')
-  }
+  const activeLocation = userLocation ?? MUMBAI_FALLBACK_LOCATION
+  const enrichedRequests = useMemo(() => enrichRequests(requests, activeLocation), [requests, activeLocation])
 
-  async function handleRegister(details: RegistrationDetails) {
-    return registerUser(details)
-  }
-
-  async function handleVerifyEmail(userId: string, otp: string, token: string) {
-    return verifyRegistrationEmail(userId, otp, token)
-  }
-
-  async function handleLogout() {
-    try {
-      await logoutUser()
-    } catch {
-      setAuthError('Signed out locally. The server could not confirm logout.')
-    } finally {
-      setAuthUser(null)
-      navigate('/login')
-    }
-  }
-
-  if (isCheckingSession) {
-    return <main role="status" className="grid min-h-screen place-items-center bg-white text-sm font-medium text-[#475569]">Checking your Neighborly session...</main>
-  }
-
-  if (!authUser) {
-    if (location.pathname === '/signup') {
-      return <SignupPage onRegister={handleRegister} onVerify={handleVerifyEmail} onResendCode={resendRegistrationCode} onAuthenticated={handleLogin} />
-    }
-    return <LoginPage onLogin={handleLogin} errorMessage={authError} />
-  }
+  if (sessionLoading) return <main className="grid min-h-screen place-items-center bg-canvas text-sm text-muted">Restoring your session…</main>
+  if (!session) return <AuthScreen onAuthenticated={setSession} />
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <Header offline={offline} />
       <main className="app-main">
         <Routes>
-          <Route path="/" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} />} />
-          <Route path="/discover" element={<DiscoverPage requests={requests} userLocation={userLocation} offers={offers} onOffer={offerHelp} />} />
-          <Route path="/create" element={<CreateRequestPage onCreate={createRequest} />} />
-          <Route path="/profile" element={<ProfilePage user={authUser} onLogout={() => void handleLogout()} />} />
-          <Route path="*" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} />} />
+          <Route path="/" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
+          <Route path="/discover" element={<DiscoverPage requests={requests} userLocation={userLocation} offers={offers} onOffer={offerHelp} loading={requestsLoading} error={requestsError} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} />} />
+          <Route path="/create" element={<CreateRequestPage onSave={saveRequest} userLocation={userLocation} request={editingRequest} />} />
+          <Route path="/profile" element={<ProfilePage user={session.user} location={activeLocation} onUserUpdated={updateUser} onLogout={signOut} />} />
+          <Route path="*" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
         </Routes>
       </main>
       <BottomNavigation onOpenActions={() => setShowActions(true)} />

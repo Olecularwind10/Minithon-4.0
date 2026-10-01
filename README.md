@@ -1,5 +1,25 @@
 # React + TypeScript + Vite
 
+## Run locally
+
+Start the authenticated backend in one terminal from the project root:
+
+```powershell
+npm install
+npm run backend:dev
+```
+
+Start the frontend from the project root in a second terminal:
+
+```powershell
+npm install
+npm run dev
+```
+
+The frontend proxies `/api` to `http://localhost:5000`. Register a local account in the app; when email delivery is not configured, the OTP is printed in the backend terminal. The community/trust module is a separate development API: run `cd server; npm run dev` to start it on port 4000.
+
+The authenticated backend uses its own SQLite database at `server/db/dev.sqlite` unless `SQLITE_PATH` is set.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

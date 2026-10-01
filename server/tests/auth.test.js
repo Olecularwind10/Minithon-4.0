@@ -374,6 +374,22 @@ describe('2. User Registration and Token Issuance', () => {
       assert.equal(body.message, 'Response recorded successfully.');
     });
 
+    it('allows only the requester to list helper responses', async () => {
+      const forbiddenRes = await fetch(`${baseUrl}/api/requests/${requestId}/responses`, {
+        headers: { Authorization: `Bearer ${user2Token}` },
+      });
+      assert.equal(forbiddenRes.status, 400);
+      assert.match((await forbiddenRes.json()).error, /only the requester/i);
+
+      const responsesRes = await fetch(`${baseUrl}/api/requests/${requestId}/responses`, {
+        headers: { Authorization: `Bearer ${user1Token}` },
+      });
+      assert.equal(responsesRes.status, 200);
+      const body = await responsesRes.json();
+      assert.equal(body.responses.length, 1);
+      assert.equal(body.responses[0].helper.id, user2.id);
+    });
+
     it('prevents User 2 from accepting a helper on User 1 request', async () => {
       const res = await fetch(`${baseUrl}/api/requests/${requestId}/accept`, {
         method: 'POST',

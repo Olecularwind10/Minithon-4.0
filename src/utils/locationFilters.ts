@@ -5,7 +5,7 @@ import { calculateDistance } from './distance'
 export const RADIUS_OPTIONS = [1, 2, 5, 10] as const
 export type RadiusKm = (typeof RADIUS_OPTIONS)[number]
 
-export function enrichRequests(requests: HelpRequest[], userLocation: LocationCoordinates): EnrichedHelpRequest[] {
+export function enrichRequests<T extends HelpRequest>(requests: T[], userLocation: LocationCoordinates): Array<T & { distanceKm: number }> {
   return requests
     .map((request) => ({
       ...request,
@@ -19,23 +19,23 @@ export function enrichRequests(requests: HelpRequest[], userLocation: LocationCo
     .sort((first, second) => first.distanceKm - second.distanceKm)
 }
 
-export function getNearbyRequests(
-  requests: HelpRequest[],
+export function getNearbyRequests<T extends HelpRequest>(
+  requests: T[],
   userLocation: LocationCoordinates,
   radiusKm: number,
-): EnrichedHelpRequest[] {
+): Array<T & { distanceKm: number }> {
   return enrichRequests(requests, userLocation).filter((request) => request.distanceKm <= radiusKm)
 }
 
-export function filterRequests(
-  requests: EnrichedHelpRequest[],
+export function filterRequests<T extends EnrichedHelpRequest>(
+  requests: T[],
   options: {
     category?: RequestCategory | 'All'
     urgency?: RequestUrgency | 'All'
     date?: 'Today' | 'Tomorrow' | 'All'
     query?: string
   },
-) {
+): T[] {
   const query = options.query?.trim().toLowerCase() ?? ''
   return requests.filter((request) => {
     const matchesCategory = !options.category || options.category === 'All' || request.category === options.category

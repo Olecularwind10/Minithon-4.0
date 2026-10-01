@@ -7,6 +7,7 @@ import {
   deleteRequest,
   getRequest,
   listRequests,
+  listRequestResponses,
   respondToRequest,
   updateRequest,
 } from '../controllers/requestController.js';
@@ -16,6 +17,7 @@ const router = express.Router();
 
 router.get('/', requireAuth, listRequests);
 router.post('/', requireAuth, createRequest);
+router.get('/:id/responses', requireAuth, listRequestResponses);
 router.get('/:id', requireAuth, getRequest);
 router.put('/:id', requireAuth, updateRequest);
 router.delete('/:id', requireAuth, deleteRequest);

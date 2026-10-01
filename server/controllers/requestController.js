@@ -15,6 +15,7 @@ export async function listRequests(req, res) {
       requesterId: req.query.requesterId,
       status: req.query.status,
       category: req.query.category,
+      currentUserId: req.user?.sub,
     });
     return res.status(200).json({ requests });
   } catch (error) {
@@ -31,6 +32,15 @@ export async function getRequest(req, res) {
     return res.status(200).json({ request });
   } catch (error) {
     return res.status(400).json({ error: error.message || 'Unable to fetch request.' });
+  }
+}
+
+export async function listRequestResponses(req, res) {
+  try {
+    const responses = await requestService.listRequestResponses(req.params.id, req.user?.sub);
+    return res.status(200).json({ responses });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to load request responses.' });
   }
 }
 

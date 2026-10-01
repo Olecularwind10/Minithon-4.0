@@ -12,7 +12,7 @@ export const REQUEST_CATEGORIES = [
 
 export type RequestCategory = (typeof REQUEST_CATEGORIES)[number]
 export type RequestUrgency = 'Low' | 'Medium' | 'High' | 'Urgent'
-export type RequestStatus = 'Open' | 'In Progress' | 'Completed'
+export type RequestStatus = 'Open' | 'Responses' | 'In Progress' | 'Completed' | 'Cancelled'
 
 export type HelpRequest = {
   id: string

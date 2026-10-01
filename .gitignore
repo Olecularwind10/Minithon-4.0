@@ -33,3 +33,6 @@ server/**/*.err
 *.njsproj
 *.sln
 *.sw?
+*.db
+*.db-wal
+*.db-shm
