@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
   community_verified INTEGER DEFAULT 0,
   community_id TEXT,
   verification_status TEXT DEFAULT 'PENDING_VERIFICATION',
+  role TEXT NOT NULL DEFAULT 'user',
   status TEXT DEFAULT 'active',
   created_at DATETIME DEFAULT (CURRENT_TIMESTAMP)
 );

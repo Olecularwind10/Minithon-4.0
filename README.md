@@ -19,6 +19,7 @@ npm run dev
 The frontend proxies `/api` to `http://localhost:5000`. Register a local account in the app; when email delivery is not configured, the OTP is printed in the backend terminal. The community/trust module is a separate development API: run `cd server; npm run dev` to start it on port 4000.
 
 The authenticated backend uses its own SQLite database at `server/db/dev.sqlite` unless `SQLITE_PATH` is set.
+Set `ADMIN_EMAILS` in `.env` to a comma-separated list of accounts that should receive the moderation tab. Restart the backend after changing it; matching existing accounts are promoted during database initialization.
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 

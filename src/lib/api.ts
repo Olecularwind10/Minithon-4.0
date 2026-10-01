@@ -16,6 +16,7 @@ export type AuthUser = {
   communityVerified: boolean
   community_id?: string | null
   verification_status: string
+  role?: 'admin' | 'user'
 }
 
 export type AuthSession = { user: AuthUser; token: string }

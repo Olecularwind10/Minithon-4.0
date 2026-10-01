@@ -15,6 +15,7 @@ import {
   Search,
   Sparkles,
   UserRound,
+  Users,
   WifiOff,
   X,
 } from 'lucide-react'
@@ -51,6 +52,7 @@ import AuthScreen from './components/AuthScreen'
 import AccountPage from './components/AccountPage'
 import ChatPage from './components/ChatPage'
 import NotificationBell from './components/NotificationBell'
+import CommunityHubPage from './components/CommunityHubPage'
 import { getCurrentLocation } from './services/locationService'
 import { getHelpers } from './services/helperService'
 import type { HelperProfile } from './types/helper'
@@ -172,6 +174,9 @@ function Header({ offline }: { offline: boolean }) {
           <NavLink to="/chats" className={({ isActive }) => `rounded-full px-4 py-2 text-sm font-semibold ${isActive ? 'active' : ''}`}>
             Chats
           </NavLink>
+          <NavLink to="/community" className={({ isActive }) => `rounded-full px-4 py-2 text-sm font-semibold ${isActive ? 'active' : ''}`}>
+            Community
+          </NavLink>
           <NavLink to="/profile" className={({ isActive }) => `rounded-full px-4 py-2 text-sm font-semibold ${isActive ? 'active' : ''}`}>
             Profile
           </NavLink>
@@ -251,6 +256,10 @@ function BottomNavigation({ onOpenActions }: { onOpenActions: () => void }) {
         <Search size={21} strokeWidth={1.8} />
         <span>Discover</span>
       </NavLink>
+      <NavLink to="/community" className={itemClass}>
+        <Users size={21} strokeWidth={1.8} />
+        <span>Community</span>
+      </NavLink>
       <button
         type="button"
         onClick={onOpenActions}
@@ -304,6 +313,11 @@ function QuickActions({ onClose }: { onClose: () => void }) {
             <span className="flex-1"><strong className="block text-sm">Offer help</strong><span className="text-xs text-muted">See what a neighbor needs today</span></span>
             <ArrowRight size={18} className="text-muted" />
           </Link>
+          <Link onClick={onClose} to="/community" className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-4 text-ink no-underline transition-colors hover:bg-surface-soft">
+            <span className="grid size-11 place-items-center rounded-xl bg-accent-soft text-accent"><Users size={21} /></span>
+            <span className="flex-1"><strong className="block text-sm">Community hub</strong><span className="text-xs text-muted">Directory, activities, trust, and safety</span></span>
+            <ArrowRight size={18} className="text-muted" />
+          </Link>
         </div>
       </section>
     </div>
@@ -320,6 +334,7 @@ function RequestCard({
   onComplete,
   onAcceptHelper,
   onChat,
+  onReport,
 }: {
   request: AppEnrichedRequest
   offered: boolean
@@ -330,6 +345,7 @@ function RequestCard({
   onComplete: (id: string) => void
   onAcceptHelper: (requestId: string, helperId: string) => void
   onChat: (otherUserId: string, requestId: string) => void
+  onReport: (requestId: string) => void
 }) {
   const [responses, setResponses] = useState<RequestResponse[] | null>(null)
   const [responsesLoading, setResponsesLoading] = useState(false)
@@ -375,6 +391,7 @@ function RequestCard({
         <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{request.distanceKm.toFixed(1)} km away, {formatApproximateLocation(request.locationLabel)}</span>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={() => onReport(request.id)} className="min-h-10 rounded-full border border-line px-4 text-sm font-semibold">Report</button>
         {!request.isMine && request.status === 'Open' && <button type="button" onClick={() => onOffer(request.id)} disabled={offered} className={`inline-flex min-h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold ${offered ? 'bg-accent-soft text-accent' : 'bg-action text-white hover:opacity-90'}`}>
           {offered ? <Check size={16} /> : <HeartHandshake size={16} />}{offered ? 'Response sent' : 'I can help'}
         </button>}
@@ -412,6 +429,7 @@ function HomePage({
   onCompleteRequest,
   onAcceptHelper,
   onChat,
+  onReportRequest,
   userName,
   loading,
   error,
@@ -428,6 +446,7 @@ function HomePage({
   onCompleteRequest: (id: string) => void
   onAcceptHelper: (requestId: string, helperId: string) => void
   onChat: (otherUserId: string, requestId: string) => void
+  onReportRequest: (id: string) => void
   userName: string
   loading: boolean
   error: string
@@ -484,7 +503,7 @@ function HomePage({
           {error && <p role="alert" className="text-sm text-action">{error}</p>}
           {!loading && !error && requests.length === 0 && <p className="text-sm text-muted">There are no open requests nearby yet.</p>}
           {!loading && requests.slice(0, 2).map((request) => (
-            <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} onChat={onChat} />
+            <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} onChat={onChat} onReport={onReportRequest} />
           ))}
         </div>
       </section>
@@ -506,6 +525,7 @@ function DiscoverPage({
   onCompleteRequest,
   onAcceptHelper,
   onChat,
+  onReportRequest,
 }: {
   requests: HelpRequest[]
   helpers: HelperProfile[]
@@ -520,6 +540,7 @@ function DiscoverPage({
   onCompleteRequest: (id: string) => void
   onAcceptHelper: (requestId: string, helperId: string) => void
   onChat: (otherUserId: string, requestId: string) => void
+  onReportRequest: (id: string) => void
 }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
@@ -607,7 +628,7 @@ function DiscoverPage({
           ) : visibleRequests.length > 0 ? (
             <div className="grid gap-3.5">
               {visibleRequests.map((request) => (
-                <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} onChat={onChat} />
+                <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} onChat={onChat} onReport={onReportRequest} />
               ))}
             </div>
           ) : (
@@ -796,6 +817,7 @@ function App() {
   const [requestsLoading, setRequestsLoading] = useState(false)
   const [requestsError, setRequestsError] = useState('')
   const [editingRequest, setEditingRequest] = useState<HelpRequest | undefined>()
+  const [reportRequestId, setReportRequestId] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -969,6 +991,11 @@ function App() {
     navigate('/discover')
   }
 
+  function openRequestReport(id: string) {
+    setReportRequestId(id)
+    navigate('/community')
+  }
+
   const activeLocation = userLocation ?? MUMBAI_FALLBACK_LOCATION
   const enrichedRequests = useMemo(() => enrichRequests(requests, activeLocation), [requests, activeLocation])
 
@@ -982,12 +1009,13 @@ function App() {
       <Header offline={offline} />
       <main className="app-main">
         <Routes>
-          <Route path="/" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} onChat={openChat} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
-          <Route path="/discover" element={<DiscoverPage requests={requests} helpers={helpers} userLocation={userLocation} offers={offers} onOffer={offerHelp} onChat={openChat} loading={requestsLoading} error={requestsError} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} />} />
+          <Route path="/" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} onChat={openChat} onReportRequest={openRequestReport} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
+          <Route path="/discover" element={<DiscoverPage requests={requests} helpers={helpers} userLocation={userLocation} offers={offers} onOffer={offerHelp} onChat={openChat} onReportRequest={openRequestReport} loading={requestsLoading} error={requestsError} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} />} />
           <Route path="/create" element={<CreateRequestPage onSave={saveRequest} userLocation={userLocation} request={editingRequest} />} />
           <Route path="/profile" element={<ProfilePage user={session.user} location={activeLocation} onUserUpdated={updateUser} onLogout={signOut} />} />
           <Route path="/chats" element={<ChatPage session={session} />} />
-          <Route path="*" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} onChat={openChat} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
+          <Route path="/community" element={<CommunityHubPage user={session.user} location={activeLocation} reportRequestId={reportRequestId} onRequestReportHandled={() => setReportRequestId('')} />} />
+          <Route path="*" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} onChat={openChat} onReportRequest={openRequestReport} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
         </Routes>
       </main>
       <BottomNavigation onOpenActions={() => setShowActions(true)} />

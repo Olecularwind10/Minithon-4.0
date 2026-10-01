@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 
-const file = process.env.DB_FILE || path.join(process.cwd(), 'neighborhood.db');
+const file = process.env.SQLITE_PATH || process.env.DB_FILE || path.join(process.cwd(), 'neighborhood.db');
 export const db = new Database(file);
 db.pragma('journal_mode = WAL');
 
@@ -100,9 +100,6 @@ CREATE TABLE IF NOT EXISTS reports (
   resolution TEXT,
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, created_at);
-CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_type, target_id);
-
 CREATE TABLE IF NOT EXISTS blocks (
   blocker_id TEXT NOT NULL,
   blocked_id TEXT NOT NULL,
@@ -149,3 +146,16 @@ ensureColumn('help_requests', 'time', 'TEXT');
 ensureColumn('help_requests', 'latitude', 'REAL');
 ensureColumn('help_requests', 'longitude', 'REAL');
 ensureColumn('help_requests', 'urgency', "TEXT NOT NULL DEFAULT 'medium'");
+ensureColumn('reports', 'report_type', 'TEXT');
+ensureColumn('reports', 'message', 'TEXT');
+ensureColumn('reports', 'reported_user_id', 'TEXT');
+ensureColumn('reports', 'target_type', 'TEXT');
+ensureColumn('reports', 'target_id', 'TEXT');
+ensureColumn('reports', 'reason', 'TEXT');
+ensureColumn('reports', 'details', 'TEXT');
+ensureColumn('reports', 'evidence', 'TEXT');
+ensureColumn('reports', 'reviewed_by', 'TEXT');
+ensureColumn('reports', 'reviewed_at', 'TEXT');
+ensureColumn('reports', 'resolution', 'TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, created_at)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_type, target_id)');

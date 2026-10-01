@@ -4,6 +4,7 @@ import http from 'node:http';
 import jwt from 'jsonwebtoken';
 import app from '../app.js';
 import { initializeDatabase } from '../db/init.js';
+import { mountCommunityRoutes } from '../app.js';
 import { env } from '../config/env.js';
 import { query } from '../config/database.js';
 
@@ -12,6 +13,7 @@ let baseUrl;
 
 before(async () => {
   await initializeDatabase();
+  await mountCommunityRoutes(env.sqlitePath);
   server = http.createServer(app);
   await new Promise((resolve) => {
     server.listen(0, () => {
@@ -548,6 +550,124 @@ describe('2. User Registration and Token Issuance', () => {
       const goodBody = await goodCodeRes.json();
       assert.equal(goodBody.user.communityVerified, true);
       assert.equal(goodBody.user.verification_status, 'VERIFIED');
+    });
+  });
+
+  describe('9. Community modules use the authenticated identity', () => {
+    let serviceId;
+    let activityId;
+
+    it('supports directory search, categories, service details, edit, and report', async () => {
+      const createRes = await fetch(`${baseUrl}/api/community-tools/directory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user1Token}` },
+        body: JSON.stringify({ name: 'Test Plumbing', category: 'plumber', area: 'Downtown', phone: '+1 555 123 4567' }),
+      });
+      assert.equal(createRes.status, 201);
+      const service = await createRes.json();
+      serviceId = service.id;
+      assert.equal(service.addedBy.id, user1.id);
+
+      const searchRes = await fetch(`${baseUrl}/api/community-tools/directory?q=plumbing&category=plumber` , {
+        headers: { Authorization: `Bearer ${user2Token}` },
+      });
+      assert.equal(searchRes.status, 200);
+      assert.ok((await searchRes.json()).items.some((item) => item.id === serviceId));
+
+      const detailRes = await fetch(`${baseUrl}/api/community-tools/directory/${serviceId}`, {
+        headers: { Authorization: `Bearer ${user1Token}` },
+      });
+      assert.equal(detailRes.status, 200);
+      assert.equal((await detailRes.json()).id, serviceId);
+
+      const editRes = await fetch(`${baseUrl}/api/community-tools/directory/${serviceId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user1Token}` },
+        body: JSON.stringify({ name: 'Updated Test Plumbing', baseUpdatedAt: service.updatedAt }),
+      });
+      assert.equal(editRes.status, 200);
+
+      const reportRes = await fetch(`${baseUrl}/api/community-tools/directory/${serviceId}/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user2Token}` },
+        body: JSON.stringify({ reason: 'other', details: 'Integration test report' }),
+      });
+      assert.equal(reportRes.status, 201);
+    });
+
+    it('supports activity create, details, join, leave, and organizer participant management', async () => {
+      const date = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+      const createRes = await fetch(`${baseUrl}/api/community-tools/activities`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user1Token}` },
+        body: JSON.stringify({ title: 'Test clean-up drive', description: 'Community API check', category: 'clean_up', area: 'Downtown', date, time: '09:00', maxParticipants: 12, latitude: 40.7, longitude: -74.0 }),
+      });
+      assert.equal(createRes.status, 201);
+      const activity = await createRes.json();
+      activityId = activity.id;
+      assert.equal(activity.organizer.id, user1.id);
+
+      const joinRes = await fetch(`${baseUrl}/api/community-tools/activities/${activityId}/join`, {
+        method: 'POST', headers: { Authorization: `Bearer ${user2Token}` },
+      });
+      assert.equal(joinRes.status, 200);
+      assert.equal((await joinRes.json()).joined, true);
+
+      const detailRes = await fetch(`${baseUrl}/api/community-tools/activities/${activityId}`, {
+        headers: { Authorization: `Bearer ${user1Token}` },
+      });
+      assert.equal(detailRes.status, 200);
+      assert.equal((await detailRes.json()).participants.length, 2);
+
+      const participantsRes = await fetch(`${baseUrl}/api/community-tools/activities/${activityId}/participants`, {
+        headers: { Authorization: `Bearer ${user1Token}` },
+      });
+      assert.equal(participantsRes.status, 200);
+      assert.equal((await participantsRes.json()).joinedCount, 2);
+
+      const leaveRes = await fetch(`${baseUrl}/api/community-tools/activities/${activityId}/leave`, {
+        method: 'POST', headers: { Authorization: `Bearer ${user2Token}` },
+      });
+      assert.equal(leaveRes.status, 200);
+    });
+
+    it('supports trust, reports, blocks, and admin authorization on the shared database', async () => {
+      const trustRes = await fetch(`${baseUrl}/api/community-tools/trust/me`, {
+        headers: { Authorization: `Bearer ${user1Token}` },
+      });
+      assert.equal(trustRes.status, 200);
+      assert.equal(typeof (await trustRes.json()).trustScore, 'number');
+
+      const peopleRes = await fetch(`${baseUrl}/api/community-tools/people?q=Bob`, {
+        headers: { Authorization: `Bearer ${user1Token}` },
+      });
+      assert.equal(peopleRes.status, 200);
+      assert.ok((await peopleRes.json()).items.some((person) => person.id === user2.id));
+
+      const reportsRes = await fetch(`${baseUrl}/api/community-tools/reports/mine`, {
+        headers: { Authorization: `Bearer ${user2Token}` },
+      });
+      assert.equal(reportsRes.status, 200);
+      assert.equal((await reportsRes.json()).items.length, 1);
+
+      const blockRes = await fetch(`${baseUrl}/api/community-tools/blocks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user1Token}` },
+        body: JSON.stringify({ userId: user2.id }),
+      });
+      assert.equal(blockRes.status, 201);
+
+      const deniedAdmin = await fetch(`${baseUrl}/api/community-tools/admin/stats`, {
+        headers: { Authorization: `Bearer ${user1Token}` },
+      });
+      assert.equal(deniedAdmin.status, 403);
+
+      await query('UPDATE users SET role = ? WHERE id = ?', ['admin', user1.id]);
+      const adminStats = await fetch(`${baseUrl}/api/community-tools/admin/stats`, {
+        headers: { Authorization: `Bearer ${user1Token}` },
+      });
+      assert.equal(adminStats.status, 200);
+      assert.ok('openReports' in await adminStats.json());
     });
   });
 });

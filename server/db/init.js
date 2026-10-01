@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
 import { db } from '../config/database.js';
+import { env } from '../config/env.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -352,7 +353,14 @@ export async function initializeDatabase() {
     if (!userColumns.some((column) => column.name === 'address')) {
       db.exec('ALTER TABLE users ADD COLUMN address TEXT');
     }
+    if (!userColumns.some((column) => column.name === 'role')) {
+      db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+    }
     seedCoreData();
+    const adminEmails = env.adminEmails;
+    for (const email of adminEmails) {
+      db.prepare('UPDATE users SET role = ? WHERE lower(email) = ?').run('admin', email);
+    }
     console.log('SQLite schema initialized successfully.');
     return true;
   } catch (error) {

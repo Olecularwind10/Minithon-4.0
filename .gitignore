@@ -17,6 +17,8 @@ dist-ssr
 
 # Local runtime artifacts
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 server/**/*.sqlite
 server/*.log
 server/*.err

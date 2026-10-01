@@ -10,5 +10,6 @@ export const env = {
   sqlitePath: process.env.SQLITE_PATH || 'server/db/dev.sqlite',
   resendApiKey: process.env.RESEND_API_KEY || '',
   fromEmail: process.env.FROM_EMAIL || '',
+  adminEmails: (process.env.ADMIN_EMAILS || '').split(',').map((email) => email.trim().toLowerCase()).filter(Boolean),
   nodeEnv: process.env.NODE_ENV || 'development',
 };

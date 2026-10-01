@@ -1,11 +1,12 @@
 import http from 'node:http';
-import app from './app.js';
+import app, { mountCommunityRoutes } from './app.js';
 import { initializeDatabase } from './db/init.js';
 import { env } from './config/env.js';
 import { setupSocket } from './socket.js';
 
 const startServer = async () => {
   await initializeDatabase();
+  await mountCommunityRoutes(env.sqlitePath);
 
   const server = http.createServer(app);
   setupSocket(server);

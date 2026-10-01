@@ -121,13 +121,14 @@ export async function registerUser(input = {}) {
   const userId = crypto.randomUUID();
   const passwordHash = await bcrypt.hash(password, 12);
   const phone = input.phone ? String(input.phone).trim() : null;
+  const role = env.adminEmails.includes(email) ? 'admin' : 'user';
 
   await query(
     `INSERT INTO users (
       id, name, email, password_hash, phone, profile_image, latitude, longitude, area, address,
       skills, availability, rating, completed_requests, email_verified, phone_verified,
-      community_verified, community_id, verification_status, status, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, NULL, 'PENDING_VERIFICATION', 'active', CURRENT_TIMESTAMP)`,
+      community_verified, community_id, verification_status, role, status, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, NULL, 'PENDING_VERIFICATION', ?, 'active', CURRENT_TIMESTAMP)`,
     [
       userId,
       name,
@@ -141,6 +142,7 @@ export async function registerUser(input = {}) {
       address,
       JSON.stringify(input.skills || []),
       JSON.stringify(input.availability || []),
+      role,
     ],
   );
 

@@ -46,13 +46,40 @@ export function createReport(reporterId, { targetType, targetId, reason, details
 
   const id = uid();
   db.prepare(
-    `INSERT INTO reports (id, reporter_id, target_type, target_id, reason, details, evidence, status, created_at)
-     VALUES (?,?,?,?,?,?,?,'open',?)`
-  ).run(id, reporterId, targetType, tid, reason, clean(details ?? '', 1000) || null, evidence, nowIso());
+    `INSERT INTO reports (
+       id, reporter_id, reported_user_id, report_type, message,
+       target_type, target_id, reason, details, evidence, status, created_at
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,'open',?)`
+  ).run(
+    id,
+    reporterId,
+    targetType === 'user' ? tid : null,
+    targetType,
+    clean(details ?? '', 1000) || reason,
+    targetType,
+    tid,
+    reason,
+    clean(details ?? '', 1000) || null,
+    evidence,
+    nowIso(),
+  );
   return { id, status: 'open', duplicate: false };
 }
 
 const router = Router();
+
+router.get('/people', (req, res) => {
+  const query = clean(req.query.q, 60);
+  if (query.length < 2) return res.json({ items: [] });
+  const like = `%${query.replace(/[\\%_]/g, (match) => `\\${match}`)}%`;
+  const items = db.prepare(
+    `SELECT id, name, area FROM users
+     WHERE id != ? AND status = 'active' AND name LIKE ? ESCAPE '\\'
+       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.blocker_id = ? AND b.blocked_id = users.id)
+     ORDER BY name LIMIT 20`
+  ).all(req.user.id, like, req.user.id);
+  res.json({ items });
+});
 
 router.post('/reports', (req, res) => {
   const out = createReport(req.user.id, req.body ?? {});

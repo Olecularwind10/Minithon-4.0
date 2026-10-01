@@ -10,6 +10,7 @@ import notificationRoutes from './routes/notifications.js';
 import ratingRoutes from './routes/ratings.js';
 import communityRoutes from './routes/community.js';
 import reportRoutes from './routes/reports.js';
+import { requireAuth } from './middleware/auth.js';
 
 const app = express();
 
@@ -49,6 +50,19 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/ratings', ratingRoutes);
 app.use('/api/community', communityRoutes);
 app.use('/api/reports', reportRoutes);
+
+export async function mountCommunityRoutes(sqlitePath) {
+  process.env.SQLITE_PATH = sqlitePath;
+  const { createCommunityRouter, seedCommunityDemoData } = await import('./community/index.js');
+  if (process.env.NODE_ENV !== 'production') seedCommunityDemoData();
+  const authMiddleware = (req, res, next) => {
+    const id = req.user?.sub;
+    if (!id) return res.status(401).json({ error: 'Authentication required.' });
+    req.user = { id };
+    next();
+  };
+  app.use('/api/community-tools', requireAuth, createCommunityRouter({ authMiddleware }));
+}
 
 app.use((err, _req, res, _next) => {
   console.error('Unhandled server error:', err);
