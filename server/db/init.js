@@ -35,6 +35,11 @@ function seedCoreData() {
   const userCount = db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
   const requestCount = db.prepare('SELECT COUNT(*) AS count FROM help_requests').get().count;
   const offerCount = db.prepare('SELECT COUNT(*) AS count FROM help_offers').get().count;
+  const conversationCount = db.prepare('SELECT COUNT(*) AS count FROM conversations').get().count;
+  const notificationCount = db.prepare('SELECT COUNT(*) AS count FROM notifications').get().count;
+  const ratingCount = db.prepare('SELECT COUNT(*) AS count FROM ratings').get().count;
+  const activityCount = db.prepare('SELECT COUNT(*) AS count FROM community_activities').get().count;
+  const reportCount = db.prepare('SELECT COUNT(*) AS count FROM reports').get().count;
 
   const fixNullLocations = () => {
     const rows = db.prepare('SELECT id, rowid FROM users WHERE area IS NULL OR latitude IS NULL OR longitude IS NULL ORDER BY rowid').all();
@@ -194,8 +199,8 @@ function seedCoreData() {
       preferred_time: '18:00',
       urgency: 'medium',
       estimated_duration: 2,
-      status: 'open',
-      selected_helper_id: null,
+      status: 'accepted',
+      selected_helper_id: 'seed-helper-1',
     };
 
     db.prepare(
@@ -234,6 +239,96 @@ function seedCoreData() {
         @availability, @status, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )`,
     ).run(sampleOffer);
+  }
+
+  if (conversationCount === 0) {
+    const sampleConversation = {
+      id: 'seed-conversation-1',
+      request_id: 'seed-request-1',
+      participant_a: 'seed-seeker-1',
+      participant_b: 'seed-helper-1',
+    };
+
+    db.prepare(
+      `INSERT OR IGNORE INTO conversations (
+        id, request_id, participant_a, participant_b, created_at
+      ) VALUES (
+        @id, @request_id, @participant_a, @participant_b, CURRENT_TIMESTAMP
+      )`,
+    ).run(sampleConversation);
+
+    const sampleMessages = [
+      {
+        id: 'seed-message-1',
+        conversation_id: 'seed-conversation-1',
+        sender_id: 'seed-seeker-1',
+        content: 'Hi, can you help me with grocery pickup today?',
+        read_status: 1,
+      },
+      {
+        id: 'seed-message-2',
+        conversation_id: 'seed-conversation-1',
+        sender_id: 'seed-helper-1',
+        content: 'Yes, I can help. I will be in Bandra shortly.',
+        read_status: 0,
+      },
+    ];
+
+    sampleMessages.forEach((message) => {
+      db.prepare(
+        `INSERT OR IGNORE INTO messages (
+          id, conversation_id, sender_id, content, read_status, created_at
+        ) VALUES (
+          @id, @conversation_id, @sender_id, @content, @read_status, CURRENT_TIMESTAMP
+        )`,
+      ).run(message);
+    });
+  }
+
+  if (notificationCount === 0) {
+    db.prepare(
+      `INSERT OR IGNORE INTO notifications (
+        id, user_id, type, title, body, read_status, created_at
+      ) VALUES (
+        'seed-notification-1', 'seed-helper-1', 'request', 'New request match', 'A seeker nearby requested grocery pickup help.', 0, CURRENT_TIMESTAMP
+      )`,
+    ).run();
+  }
+
+  if (ratingCount === 0 && requestCount > 0) {
+    db.prepare(
+      `INSERT OR IGNORE INTO ratings (
+        id, request_id, reviewer_id, reviewed_user_id, rating, comment, created_at
+      ) VALUES (
+        'seed-rating-1', 'seed-request-1', 'seed-seeker-1', 'seed-helper-1', 5, 'Very helpful and on time.', CURRENT_TIMESTAMP
+      )`,
+    ).run();
+
+    const average = db.prepare('SELECT AVG(rating) AS average_rating FROM ratings WHERE reviewed_user_id = ?').get('seed-helper-1');
+    db.prepare('UPDATE users SET rating = ? WHERE id = ?').run(Number(average.average_rating || 0), 'seed-helper-1');
+  }
+
+  if (activityCount === 0) {
+    db.prepare(
+      `INSERT OR IGNORE INTO community_activities (
+        id, organizer_id, title, description, category, latitude, longitude, date, time,
+        max_participants, status, created_at
+      ) VALUES (
+        'seed-activity-1', 'seed-organizer-1', 'Mumbai Neighbourhood Cleanup Drive',
+        'Join volunteers for a local cleanup and community support activity in Powai.',
+        'cleanup', 19.1197, 72.905, '2026-10-12', '10:00', 30, 'upcoming', CURRENT_TIMESTAMP
+      )`,
+    ).run();
+  }
+
+  if (reportCount === 0) {
+    db.prepare(
+      `INSERT OR IGNORE INTO reports (
+        id, reporter_id, reported_user_id, report_type, message, status, created_at
+      ) VALUES (
+        'seed-report-1', 'seed-seeker-1', 'seed-helper-1', 'harassment', 'Reported for inappropriate communication during a request.', 'pending', CURRENT_TIMESTAMP
+      )`,
+    ).run();
   }
 }
 

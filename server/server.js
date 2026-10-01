@@ -1,11 +1,16 @@
+import http from 'node:http';
 import app from './app.js';
 import { initializeDatabase } from './db/init.js';
 import { env } from './config/env.js';
+import { setupSocket } from './socket.js';
 
 const startServer = async () => {
   await initializeDatabase();
 
-  app.listen(env.port, () => {
+  const server = http.createServer(app);
+  setupSocket(server);
+
+  server.listen(env.port, () => {
     console.log(`Mansi backend listening on http://localhost:${env.port}`);
   });
 };
