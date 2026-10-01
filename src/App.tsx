@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -26,72 +26,21 @@ import {
   Routes,
   useNavigate,
 } from 'react-router-dom'
+import { getCurrentLocation } from './services/locationService'
+import { getRequests } from './services/requestService'
+import { MUMBAI_FALLBACK_LOCATION, type LocationCoordinates } from './types/location'
+import {
+  REQUEST_CATEGORIES,
+  type EnrichedHelpRequest,
+  type HelpRequest,
+  type RequestCategory,
+  type RequestUrgency,
+} from './types/request'
+import { enrichRequests, filterRequests, getNearbyRequests, formatRequestDate, RADIUS_OPTIONS, type RadiusKm } from './utils/locationFilters'
 
-export type HelpRequest = {
-  id: string
-  title: string
-  description: string
-  category: string
-  when: string
-  location: string
-  distance: string
-  name: string
-  avatar: string
-  image: string
-}
-
-const initialRequests: HelpRequest[] = [
-  {
-    id: '1',
-    title: 'Could someone water my plants?',
-    description: 'I’m away for a few days and my balcony plants could use a little drink.',
-    category: 'Around home',
-    when: 'Today, before 6 pm',
-    location: 'Maple Street',
-    distance: '0.2 mi',
-    name: 'Nina Flores',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
-    image: 'https://images.unsplash.com/photo-1485955900006-10f4d324d411?auto=format&fit=crop&w=900&q=85',
-  },
-  {
-    id: '2',
-    title: 'A lift to the farmers market',
-    description: 'My bike is in the shop. Happy to chip in for gas and keep you company.',
-    category: 'Rides',
-    when: 'Saturday, 9:30 am',
-    location: 'Cedar Grove',
-    distance: '0.4 mi',
-    name: 'Jonah Reed',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&h=120&q=80',
-    image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=85',
-  },
-  {
-    id: '3',
-    title: 'Can anyone grab a few groceries?',
-    description: 'Just a couple of things from the corner shop while I recover from a cold.',
-    category: 'Groceries',
-    when: 'Today, whenever works',
-    location: 'Willow Lane',
-    distance: '0.6 mi',
-    name: 'Amara Okafor',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-    image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=85',
-  },
-  {
-    id: '4',
-    title: 'A hand moving a bookcase',
-    description: 'The new place is just upstairs. One strong pair of hands would help a lot.',
-    category: 'Around home',
-    when: 'Sunday, 11 am',
-    location: 'Pine Court',
-    distance: '0.8 mi',
-    name: 'Eli Bennett',
-    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=120&h=120&q=80',
-    image: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=900&q=85',
-  },
-]
-
-const categories = ['All', 'Groceries', 'Rides', 'Around home', 'Pet care']
+const categories = ['All', ...REQUEST_CATEGORIES] as const
+const urgencyOptions = ['All', 'Low', 'Medium', 'High', 'Urgent'] as const
+const dateOptions = ['All', 'Today', 'Tomorrow'] as const
 const RequestMap = lazy(() => import('./components/NeighborhoodRequestMap'))
 
 function useOfflineStatus() {
@@ -223,7 +172,7 @@ function RequestCard({
   offered,
   onOffer,
 }: {
-  request: HelpRequest
+  request: EnrichedHelpRequest
   offered: boolean
   onOffer: (id: string) => void
 }) {
@@ -246,9 +195,9 @@ function RequestCard({
         {request.image && <img src={request.image} alt="" className="size-[76px] shrink-0 rounded-[16px] object-cover sm:size-[92px]" loading="lazy" />}
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3.5 text-xs font-medium text-muted">
-        <span className="inline-flex items-center gap-1.5"><Clock3 size={14} />{request.when}</span>
-        <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{request.distance} away</span>
-        <span>{request.location}</span>
+        <span className="inline-flex items-center gap-1.5"><Clock3 size={14} />{formatRequestDate(request.date, request.time)}</span>
+        <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{request.distanceKm.toFixed(1)} km away</span>
+        <span>{request.locationLabel}</span>
       </div>
       <button
         type="button"
@@ -271,7 +220,7 @@ function HomePage({
   onDismissNotice,
   onOfferHelp,
 }: {
-  requests: HelpRequest[]
+  requests: EnrichedHelpRequest[]
   offers: Record<string, boolean>
   onOffer: (id: string) => void
   notice: string
@@ -288,7 +237,7 @@ function HomePage({
       )}
       <section className="mb-6 flex items-end justify-between gap-3">
         <div>
-          <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-accent"><MapPin size={15} /> Cedar Grove</p>
+          <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-accent"><MapPin size={15} /> Mumbai, Maharashtra</p>
           <h1 className="mt-1 text-[30px] font-bold leading-tight tracking-[-0.8px] text-ink sm:text-[36px]">Morning, Maya</h1>
           <p className="mt-1.5 text-sm text-muted sm:text-base">A few good neighbors are close by.</p>
         </div>
@@ -337,20 +286,32 @@ function HomePage({
 
 function DiscoverPage({
   requests,
+  userLocation,
   offers,
   onOffer,
 }: {
   requests: HelpRequest[]
+  userLocation: LocationCoordinates | null
   offers: Record<string, boolean>
   onOffer: (id: string) => void
 }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
-  const visibleRequests = requests.filter((request) => {
-    const matchesCategory = category === 'All' || request.category === category
-    const searchable = `${request.title} ${request.description} ${request.location} ${request.name}`.toLowerCase()
-    return matchesCategory && searchable.includes(query.toLowerCase().trim())
-  })
+  const [urgency, setUrgency] = useState('All')
+  const [date, setDate] = useState('All')
+  const [radiusKm, setRadiusKm] = useState<RadiusKm>(5)
+  const [searchedRequestIds, setSearchedRequestIds] = useState<string[] | null>(null)
+  const activeLocation = userLocation ?? MUMBAI_FALLBACK_LOCATION
+  const nearbyRequests = useMemo(() => getNearbyRequests(requests, activeLocation, radiusKm), [requests, activeLocation, radiusKm])
+  const visibleRequests = useMemo(() => filterRequests(
+    searchedRequestIds ? nearbyRequests.filter((request) => searchedRequestIds.includes(request.id)) : nearbyRequests,
+    {
+      category: category as RequestCategory | 'All',
+      urgency: urgency as RequestUrgency | 'All',
+      date: date as 'Today' | 'Tomorrow' | 'All',
+      query,
+    },
+  ), [nearbyRequests, searchedRequestIds, category, urgency, date, query])
 
   return (
     <div className="page-enter">
@@ -371,16 +332,31 @@ function DiscoverPage({
           </button>
         ))}
       </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <select aria-label="Filter by radius" value={radiusKm} onChange={(event) => { setRadiusKm(Number(event.target.value) as RadiusKm); setSearchedRequestIds(null) }} className="field-input min-h-10 py-2 text-sm">
+          {RADIUS_OPTIONS.map((radius) => <option key={radius} value={radius}>{radius} km radius</option>)}
+        </select>
+        <select aria-label="Filter by urgency" value={urgency} onChange={(event) => setUrgency(event.target.value)} className="field-input min-h-10 py-2 text-sm">
+          {urgencyOptions.map((item) => <option key={item} value={item}>{item === 'All' ? 'All urgency' : item}</option>)}
+        </select>
+        <select aria-label="Filter by date" value={date} onChange={(event) => setDate(event.target.value)} className="field-input min-h-10 py-2 text-sm">
+          {dateOptions.map((item) => <option key={item} value={item}>{item === 'All' ? 'Any date' : item}</option>)}
+        </select>
+      </div>
       <div className="mt-6 grid items-start gap-5 lg:grid-cols-[1fr_1.08fr]">
         <div className="lg:sticky lg:top-5">
           <Suspense fallback={<div role="status" className="map-loading">Loading neighborhood map</div>}>
-            <RequestMap requests={visibleRequests} />
+            {userLocation ? (
+              <RequestMap key={`${userLocation.latitude}-${userLocation.longitude}`} requests={visibleRequests} userLocation={userLocation} onSearchThisArea={(ids) => setSearchedRequestIds(ids)} />
+            ) : (
+              <div role="status" className="map-loading">Finding your live location</div>
+            )}
           </Suspense>
         </div>
         <section>
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-lg font-bold text-ink">Requests near you</h2>
-            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted"><MapPin size={14} /> Cedar Grove</span>
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted"><MapPin size={14} /> Mumbai, Maharashtra</span>
           </div>
           {visibleRequests.length > 0 ? (
             <div className="grid gap-3.5">
@@ -405,10 +381,10 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
   const navigate = useNavigate()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [category, setCategory] = useState('Around home')
+  const [category, setCategory] = useState<RequestCategory>('Around Home')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
-  const [location, setLocation] = useState('Cedar Grove')
+  const [location, setLocation] = useState('Parel')
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -417,12 +393,16 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
       title: title.trim(),
       description: description.trim(),
       category,
-      when: [date, time].filter(Boolean).join(', '),
-      location: location.trim(),
-      distance: 'nearby',
+      latitude: MUMBAI_FALLBACK_LOCATION.latitude,
+      longitude: MUMBAI_FALLBACK_LOCATION.longitude,
+      urgency: 'Medium',
+      date,
+      time,
+      status: 'Open',
       name: 'Maya Patel',
       avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
       image: '',
+      locationLabel: location.trim(),
     }
     onCreate(newRequest)
     navigate('/')
@@ -449,8 +429,8 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
           <label>
             <span className="field-label">Category</span>
             <span className="relative block">
-              <select value={category} onChange={(event) => setCategory(event.target.value)} className="field-input appearance-none pr-10">
-                {categories.filter((item) => item !== 'All').map((item) => <option key={item}>{item}</option>)}
+                <select value={category} onChange={(event) => setCategory(event.target.value as RequestCategory)} className="field-input appearance-none pr-10">
+                {categories.filter((item): item is RequestCategory => item !== 'All').map((item) => <option key={item}>{item}</option>)}
               </select>
               <ChevronDown size={17} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted" />
             </span>
@@ -472,7 +452,7 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
             </label>
           </div>
           <label>
-            <span className="field-label">Nearby location</span>
+            <span className="field-label">Nearby Mumbai area</span>
             <span className="relative block">
               <MapPin size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted" />
               <input required maxLength={60} value={location} onChange={(event) => setLocation(event.target.value)} className="field-input pl-11" />
@@ -499,7 +479,7 @@ function ProfilePage() {
           <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=240&h=240&q=85" alt="Maya Patel" className="size-24 rounded-full object-cover ring-4 ring-white/15" />
           <div>
             <h2 className="text-[23px] font-bold text-white">Maya Patel</h2>
-            <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-white/65"><MapPin size={15} /> Cedar Grove neighbor</p>
+            <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-white/65"><MapPin size={15} /> Mumbai neighbor</p>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-white/75">Happy to lend a hand with errands, plants, and getting things from A to B.</p>
           </div>
         </div>
@@ -531,11 +511,20 @@ function ProfilePage() {
 
 function App() {
   const offline = useOfflineStatus()
-  const [requests, setRequests] = useState(initialRequests)
+  const [requests, setRequests] = useState<HelpRequest[]>([])
+  const [userLocation, setUserLocation] = useState<LocationCoordinates | null>(null)
   const [offers, setOffers] = useState<Record<string, boolean>>({})
   const [showActions, setShowActions] = useState(false)
   const [notice, setNotice] = useState('')
   const navigate = useNavigate()
+
+  useEffect(() => {
+    void getRequests().then(setRequests)
+    void getCurrentLocation().then(setUserLocation)
+  }, [])
+
+  const activeLocation = userLocation ?? MUMBAI_FALLBACK_LOCATION
+  const enrichedRequests = useMemo(() => enrichRequests(requests, activeLocation), [requests, activeLocation])
 
   function offerHelp(id: string) {
     setOffers((current) => ({ ...current, [id]: true }))
@@ -555,11 +544,11 @@ function App() {
       <Header offline={offline} />
       <main className="app-main">
         <Routes>
-          <Route path="/" element={<HomePage requests={requests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} />} />
-          <Route path="/discover" element={<DiscoverPage requests={requests} offers={offers} onOffer={offerHelp} />} />
+          <Route path="/" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} />} />
+          <Route path="/discover" element={<DiscoverPage requests={requests} userLocation={userLocation} offers={offers} onOffer={offerHelp} />} />
           <Route path="/create" element={<CreateRequestPage onCreate={createRequest} />} />
           <Route path="/profile" element={<ProfilePage />} />
-          <Route path="*" element={<HomePage requests={requests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} />} />
+          <Route path="*" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} />} />
         </Routes>
       </main>
       <BottomNavigation onOpenActions={() => setShowActions(true)} />
