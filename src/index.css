@@ -692,7 +692,7 @@ select:focus-visible {
 }
 
 .discover-map {
-  height: 390px;
+  height: clamp(460px, 70vh, 620px);
 }
 
 .map-loading {
@@ -935,12 +935,12 @@ select:focus-visible {
 
 @media (min-width: 1024px) {
   .discover-map {
-    height: min(68vh, 680px);
-    min-height: 520px;
+    height: min(74vh, 760px);
+    min-height: 600px;
   }
 
   .map-loading {
-    min-height: 520px;
+    min-height: 600px;
   }
 }
 
