@@ -608,7 +608,7 @@ function DiscoverPage({
           </label>
         </div>
       </section>
-      <div className="mt-6 grid items-start gap-5 lg:grid-cols-[1fr_1.08fr]">
+      <div className="mt-6 grid items-start gap-5 lg:grid-cols-[1.15fr_0.85fr]">
         <div className="lg:sticky lg:top-5">
           <Suspense fallback={<div role="status" className="map-loading">Loading neighborhood map</div>}>
             {userLocation ? (
