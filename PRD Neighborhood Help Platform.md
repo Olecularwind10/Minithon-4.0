@@ -48,6 +48,8 @@ The Neighborhood Help Platform is a location-based community assistance platform
 9. Discover local services and community activities.
 10. Receive notifications for relevant nearby assistance opportunities.
 
+For the hackathon MVP, the platform assumes Indian cities and neighborhoods such as Mumbai, Pune, Bengaluru, Hyderabad, Delhi NCR, and Chennai. Sample data, map pins, demo requests, and neighborhood references should use Indian localities (for example Powai, Andheri, Baner, Koramangala, Gachibowli, Rohini, and TSEC) instead of non-Indian locations.
+
 The core technical challenge is the **Smart Matching Engine**, which ranks potential helpers based on multiple signals rather than simply showing the nearest person.
 
 ---

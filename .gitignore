@@ -11,6 +11,17 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+
+# Local runtime artifacts
+*.sqlite
+server/**/*.sqlite
+server/*.log
+server/*.err
+server/**/*.log
+server/**/*.err
 
 # Editor directories and files
 .vscode/*
