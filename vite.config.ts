@@ -9,7 +9,7 @@ export default defineConfig({
     allowedHosts: ['alessandro-necessitous-leandro.ngrok-free.dev'],
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:5000',
         changeOrigin: true,
       },
     },

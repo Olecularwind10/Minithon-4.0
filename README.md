@@ -2,13 +2,11 @@
 
 ## Run locally
 
-Start the backend in one terminal:
+Start the authenticated backend in one terminal from the project root:
 
 ```powershell
-cd server
 npm install
-npm run seed
-npm run dev
+npm run backend:dev
 ```
 
 Start the frontend from the project root in a second terminal:
@@ -18,9 +16,9 @@ npm install
 npm run dev
 ```
 
-The frontend proxies `/api` to `http://localhost:4000`. Local API requests use the seeded `u_asha` identity by default; set `VITE_API_USER_ID` before starting Vite to use another seeded user.
+The frontend proxies `/api` to `http://localhost:5000`. Register a local account in the app; when email delivery is not configured, the OTP is printed in the backend terminal. The community/trust module is a separate development API: run `cd server; npm run dev` to start it on port 4000.
 
-The authenticated backend added under `server/` can be started separately from the project root with `npm run backend:dev` (port 5000). It uses its own SQLite database at `server/db/dev.sqlite` unless `SQLITE_PATH` is set.
+The authenticated backend uses its own SQLite database at `server/db/dev.sqlite` unless `SQLITE_PATH` is set.
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
