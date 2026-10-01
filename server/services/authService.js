@@ -26,6 +26,7 @@ function toPublicUser(user) {
   const safeUser = { ...user };
   delete safeUser.password_hash;
   delete safeUser.phone;
+  delete safeUser.address;
   delete safeUser.otp_hash;
   delete safeUser.passwordHash;
 
@@ -37,6 +38,12 @@ function toPublicUser(user) {
     phoneVerified: Boolean(safeUser.phone_verified),
     communityVerified: Boolean(safeUser.community_verified),
   };
+}
+
+function toPrivateUser(user) {
+  const safeUser = toPublicUser(user);
+  if (!safeUser) return null;
+  return { ...safeUser, phone: user.phone, address: user.address };
 }
 
 function isValidEmail(email) {
@@ -100,6 +107,7 @@ export async function registerUser(input = {}) {
   const name = String(input.name || '').trim();
   const email = String(input.email || '').trim().toLowerCase();
   const password = String(input.password || '');
+  const address = String(input.address || '').trim() || null;
 
   if (!name) throw new Error('Name is required.');
   if (!isValidEmail(email)) throw new Error('A valid email is required.');
@@ -116,10 +124,10 @@ export async function registerUser(input = {}) {
 
   await query(
     `INSERT INTO users (
-      id, name, email, password_hash, phone, profile_image, latitude, longitude, area,
+      id, name, email, password_hash, phone, profile_image, latitude, longitude, area, address,
       skills, availability, rating, completed_requests, email_verified, phone_verified,
       community_verified, community_id, verification_status, status, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, NULL, 'PENDING_VERIFICATION', 'active', CURRENT_TIMESTAMP)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, NULL, 'PENDING_VERIFICATION', 'active', CURRENT_TIMESTAMP)`,
     [
       userId,
       name,
@@ -130,6 +138,7 @@ export async function registerUser(input = {}) {
       input.latitude ?? null,
       input.longitude ?? null,
       input.area || null,
+      address,
       JSON.stringify(input.skills || []),
       JSON.stringify(input.availability || []),
     ],
@@ -166,9 +175,9 @@ export async function loginUser(email, password) {
   };
 }
 
-export async function getUserById(id) {
+export async function getUserById(id, { includePrivate = false } = {}) {
   const result = await query('SELECT * FROM users WHERE id = ?', [id]);
-  return toPublicUser(result.rows[0] || null);
+  return includePrivate ? toPrivateUser(result.rows[0] || null) : toPublicUser(result.rows[0] || null);
 }
 
 export async function updateUserProfile(id, updates = {}) {
@@ -176,19 +185,19 @@ export async function updateUserProfile(id, updates = {}) {
   const values = [];
 
   for (const [key, value] of Object.entries(updates)) {
-    if (['name', 'phone', 'profileImage', 'latitude', 'longitude', 'area', 'skills', 'availability'].includes(key)) {
+    if (['name', 'phone', 'profileImage', 'latitude', 'longitude', 'area', 'address', 'skills', 'availability'].includes(key)) {
       fields.push(`${toColumnName(key)} = ?`);
       values.push(key === 'skills' || key === 'availability' ? JSON.stringify(value || []) : value);
     }
   }
 
   if (!fields.length) {
-    return getUserById(id);
+    return getUserById(id, { includePrivate: true });
   }
 
   values.push(id);
   await query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
-  return getUserById(id);
+  return getUserById(id, { includePrivate: true });
 }
 
 function toColumnName(key) {
@@ -199,6 +208,7 @@ function toColumnName(key) {
     latitude: 'latitude',
     longitude: 'longitude',
     area: 'area',
+    address: 'address',
     skills: 'skills',
     availability: 'availability',
   };

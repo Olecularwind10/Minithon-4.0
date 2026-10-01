@@ -12,6 +12,12 @@ export default defineConfig({
   },
   server: {
     allowedHosts: ['alessandro-necessitous-leandro.ngrok-free.dev'],
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
+    },
   },
   plugins: [
     react(),
@@ -26,11 +32,11 @@ export default defineConfig({
         'maplibre-gl-shared.mjs',
       ],
       manifest: {
-        name: 'Neighborhood Help',
-        short_name: 'Help',
+        name: 'Neighborly',
+        short_name: 'Neighborly',
         description: 'A little help goes a long way.',
-        theme_color: '#245846',
-        background_color: '#f5f7f2',
+        theme_color: '#0d9488',
+        background_color: '#f8fafc',
         display: 'standalone',
         start_url: '/',
         scope: '/',

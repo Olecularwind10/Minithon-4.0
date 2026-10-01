@@ -60,7 +60,7 @@ export function logout(_req, res) {
 
 export async function me(req, res) {
   try {
-    const user = await getUserById(req.user?.sub);
+    const user = await getUserById(req.user?.sub, { includePrivate: true });
     return res.status(200).json({ user });
   } catch {
     return res.status(404).json({ error: 'User not found.' });

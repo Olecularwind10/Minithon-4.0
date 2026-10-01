@@ -2,19 +2,17 @@ import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 're
 import {
   ArrowLeft,
   ArrowRight,
-  Bike,
   CalendarDays,
   Check,
   ChevronDown,
   Clock3,
   HeartHandshake,
   House,
+  LogOut,
   MapPin,
   Plus,
   Search,
-  ShoppingBasket,
   Sparkles,
-  Star,
   UserRound,
   WifiOff,
   X,
@@ -24,8 +22,20 @@ import {
   NavLink,
   Route,
   Routes,
+  useLocation,
   useNavigate,
 } from 'react-router-dom'
+import LoginPage from './components/LoginPage'
+import SignupPage from './components/SignupPage'
+import {
+  logoutUser,
+  registerUser,
+  resendRegistrationCode,
+  restoreSession,
+  verifyRegistrationEmail,
+  type AuthUser,
+  type RegistrationDetails,
+} from './services/authService'
 import { getCurrentLocation } from './services/locationService'
 import { getRequests } from './services/requestService'
 import { MUMBAI_FALLBACK_LOCATION, type LocationCoordinates } from './types/location'
@@ -41,7 +51,14 @@ import { enrichRequests, filterRequests, getNearbyRequests, formatRequestDate, R
 const categories = ['All', ...REQUEST_CATEGORIES] as const
 const urgencyOptions = ['All', 'Low', 'Medium', 'High', 'Urgent'] as const
 const dateOptions = ['All', 'Today', 'Tomorrow'] as const
+const neighborhoodAreas = ['Parel', 'Lower Parel', 'Dadar', 'Sion', 'Matunga', 'Matunga East'] as const
 const RequestMap = lazy(() => import('./components/NeighborhoodRequestMap'))
+
+function formatApproximateLocation(location: string) {
+  return neighborhoodAreas.includes(location as (typeof neighborhoodAreas)[number])
+    ? `Near ${location}`
+    : 'Nearby'
+}
 
 function useOfflineStatus() {
   const [offline, setOffline] = useState(
@@ -65,7 +82,7 @@ function Brand() {
   return (
     <Link to="/" className="flex items-center gap-2.5 text-ink no-underline">
       <img src="/app-icon.svg" alt="" className="size-9 rounded-xl" />
-      <span className="text-[16px] font-bold tracking-[-0.3px]">Neighborhood Help</span>
+      <span className="text-[16px] font-bold tracking-[-0.3px]">Neighborly</span>
     </Link>
   )
 }
@@ -184,6 +201,7 @@ function RequestCard({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="text-sm font-bold text-ink">{request.name}</span>
             <span className="rounded-full bg-accent-soft px-2.5 py-1 text-[11px] font-semibold text-accent">{request.category}</span>
+            <span className="request-urgency" data-urgency={request.urgency}>{request.urgency}</span>
           </div>
         </div>
       </div>
@@ -196,8 +214,7 @@ function RequestCard({
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3.5 text-xs font-medium text-muted">
         <span className="inline-flex items-center gap-1.5"><Clock3 size={14} />{formatRequestDate(request.date, request.time)}</span>
-        <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{request.distanceKm.toFixed(1)} km away</span>
-        <span>{request.locationLabel}</span>
+        <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{request.distanceKm.toFixed(1)} km away, {formatApproximateLocation(request.locationLabel)}</span>
       </div>
       <button
         type="button"
@@ -384,7 +401,7 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
   const [category, setCategory] = useState<RequestCategory>('Around Home')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
-  const [location, setLocation] = useState('Parel')
+  const [location, setLocation] = useState<(typeof neighborhoodAreas)[number]>('Parel')
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -416,7 +433,7 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
         <h1 className="mt-1 text-[30px] font-bold leading-tight tracking-[-0.8px] text-ink sm:text-[36px]">What do you need a hand with?</h1>
         <p className="mt-2 text-sm text-muted sm:text-base">Share a few details so someone nearby can lend a hand.</p>
       </div>
-      <form onSubmit={handleSubmit} className="rounded-[24px] border border-line bg-surface p-5 shadow-[0_12px_36px_rgba(39,41,34,0.05)] sm:p-7">
+      <form onSubmit={handleSubmit} className="rounded-lg border border-line bg-surface p-5 shadow-[0_12px_36px_rgba(15,23,42,0.05)] backdrop-blur-md sm:p-7">
         <div className="grid gap-5">
           <label>
             <span className="field-label">What do you need?</span>
@@ -455,7 +472,9 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
             <span className="field-label">Nearby Mumbai area</span>
             <span className="relative block">
               <MapPin size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted" />
-              <input required maxLength={60} value={location} onChange={(event) => setLocation(event.target.value)} className="field-input pl-11" />
+                <select required value={location} onChange={(event) => setLocation(event.target.value as (typeof neighborhoodAreas)[number])} className="field-input pl-11">
+                  {neighborhoodAreas.map((area) => <option key={area} value={area}>{area}</option>)}
+                </select>
             </span>
           </label>
         </div>
@@ -467,43 +486,42 @@ function CreateRequestPage({ onCreate }: { onCreate: (request: HelpRequest) => v
   )
 }
 
-function ProfilePage() {
+function ProfilePage({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   return (
     <div className="page-enter mx-auto max-w-[680px]">
       <div className="mb-6">
         <p className="text-sm font-semibold text-accent">Your neighborhood profile</p>
         <h1 className="mt-1 text-[30px] font-bold leading-tight tracking-[-0.8px] text-ink sm:text-[36px]">A little about you</h1>
       </div>
-      <section className="rounded-[26px] bg-[#292d27] p-5 text-white shadow-[0_16px_36px_rgba(39,41,34,0.12)] sm:p-7">
+      <section className="rounded-lg bg-[#0f766e] p-5 text-white shadow-[0_16px_36px_rgba(15,23,42,0.12)] sm:p-7">
         <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:text-left">
-          <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=240&h=240&q=85" alt="Maya Patel" className="size-24 rounded-full object-cover ring-4 ring-white/15" />
+          <span aria-hidden="true" className="grid size-24 shrink-0 place-items-center rounded-full bg-white text-3xl font-bold text-[#0F172A]">{user.name.slice(0, 1).toUpperCase()}</span>
           <div>
-            <h2 className="text-[23px] font-bold text-white">Maya Patel</h2>
-            <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-white/65"><MapPin size={15} /> Mumbai neighbor</p>
-            <p className="mt-2 max-w-md text-sm leading-relaxed text-white/75">Happy to lend a hand with errands, plants, and getting things from A to B.</p>
+            <h2 className="text-[23px] font-bold text-white">{user.name}</h2>
+            <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-white/80"><MapPin size={15} />{user.area || 'Neighborhood not set'}</p>
+            <p className="mt-2 max-w-md break-all text-sm leading-relaxed text-white/85">{user.email}</p>
           </div>
         </div>
-        <div className="mt-6 grid grid-cols-3 divide-x divide-white/15 border-t border-white/15 pt-5 text-center">
-          <div><p className="inline-flex items-center gap-1 text-xl font-bold text-white"><Star size={17} className="fill-current text-[#f09a7f]" /> 4.9</p><p className="mt-1 text-xs text-white/60">Neighbor rating</p></div>
-          <div><p className="text-xl font-bold text-white">12</p><p className="mt-1 text-xs text-white/60">Helps given</p></div>
-          <div><p className="text-xl font-bold text-white">8</p><p className="mt-1 text-xs text-white/60">Completed</p></div>
+        <div className="mt-6 grid gap-3 border-t border-white/20 pt-5 text-sm text-white/90 sm:grid-cols-2">
+          {user.phone && <p>Contact: {user.phone}</p>}
+          {user.address && <p>Address: {user.address}</p>}
+          <p>Email status: {user.emailVerified ? 'Verified' : 'Pending verification'}</p>
         </div>
       </section>
       <section className="section-rule mt-7 pt-6">
         <div className="flex items-center gap-2"><HeartHandshake size={19} className="text-accent" /><h2 className="text-lg font-bold text-ink">Skills I can share</h2></div>
         <div className="mt-4 flex flex-wrap gap-2">
-          {['Grocery runs', 'Plant care', 'Driving', 'Dog walking'].map((skill) => <span key={skill} className="rounded-full bg-accent-soft px-3.5 py-2 text-sm font-semibold text-accent">{skill}</span>)}
+          {user.skills.length > 0 ? user.skills.map((skill) => <span key={skill} className="rounded-full bg-accent-soft px-3.5 py-2 text-sm font-semibold text-accent">{skill}</span>) : <p className="text-sm text-muted">Add skills to your profile when you are ready.</p>}
         </div>
       </section>
-      <section className="section-rule mt-7 pt-6">
-        <div className="flex items-center justify-between gap-3">
-          <div><h2 className="text-lg font-bold text-ink">Completed helps</h2><p className="mt-1 text-sm text-muted">Little things that added up.</p></div>
-          <span className="grid size-10 place-items-center rounded-full bg-accent-soft text-accent"><Check size={19} /></span>
+      <section className="section-rule mt-7 flex flex-col gap-4 pt-6 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-ink">Sign out</h2>
+          <p className="mt-1 text-sm text-muted">Sign out of this device to protect your account.</p>
         </div>
-        <div className="mt-3 grid gap-x-8 sm:grid-cols-2">
-          <div className="border-b border-line py-4"><span className="inline-flex items-center gap-2 text-sm font-bold text-ink"><ShoppingBasket size={17} className="text-accent" /> Grocery pickup</span><p className="mt-1 pl-6 text-xs text-muted">Helped Nina on Monday</p></div>
-          <div className="border-b border-line py-4"><span className="inline-flex items-center gap-2 text-sm font-bold text-ink"><Bike size={17} className="text-accent" /> Ride to the clinic</span><p className="mt-1 pl-6 text-xs text-muted">Helped Marcus last week</p></div>
-        </div>
+        <button type="button" onClick={onLogout} className="inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-md border border-line bg-surface px-4 text-sm font-semibold text-ink transition-colors hover:bg-surface-soft sm:self-auto">
+          <LogOut size={17} /> Log out
+        </button>
       </section>
     </div>
   )
@@ -511,17 +529,40 @@ function ProfilePage() {
 
 function App() {
   const offline = useOfflineStatus()
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [isCheckingSession, setIsCheckingSession] = useState(true)
+  const [authError, setAuthError] = useState('')
   const [requests, setRequests] = useState<HelpRequest[]>([])
   const [userLocation, setUserLocation] = useState<LocationCoordinates | null>(null)
   const [offers, setOffers] = useState<Record<string, boolean>>({})
   const [showActions, setShowActions] = useState(false)
   const [notice, setNotice] = useState('')
+  const location = useLocation()
   const navigate = useNavigate()
 
   useEffect(() => {
+    let isCurrent = true
+    void restoreSession()
+      .then((user) => {
+        if (!isCurrent) return
+        setAuthUser(user)
+        setAuthError('')
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent) return
+        setAuthError(error instanceof Error ? error.message : 'Could not verify your session.')
+      })
+      .finally(() => {
+        if (isCurrent) setIsCheckingSession(false)
+      })
+    return () => { isCurrent = false }
+  }, [])
+
+  useEffect(() => {
+    if (!authUser) return
     void getRequests().then(setRequests)
     void getCurrentLocation().then(setUserLocation)
-  }, [])
+  }, [authUser])
 
   const activeLocation = userLocation ?? MUMBAI_FALLBACK_LOCATION
   const enrichedRequests = useMemo(() => enrichRequests(requests, activeLocation), [requests, activeLocation])
@@ -539,6 +580,42 @@ function App() {
     navigate('/discover')
   }
 
+  async function handleLogin(user: AuthUser) {
+    setAuthError('')
+    setAuthUser(user)
+    navigate('/')
+  }
+
+  async function handleRegister(details: RegistrationDetails) {
+    return registerUser(details)
+  }
+
+  async function handleVerifyEmail(userId: string, otp: string, token: string) {
+    return verifyRegistrationEmail(userId, otp, token)
+  }
+
+  async function handleLogout() {
+    try {
+      await logoutUser()
+    } catch {
+      setAuthError('Signed out locally. The server could not confirm logout.')
+    } finally {
+      setAuthUser(null)
+      navigate('/login')
+    }
+  }
+
+  if (isCheckingSession) {
+    return <main role="status" className="grid min-h-screen place-items-center bg-white text-sm font-medium text-[#475569]">Checking your Neighborly session...</main>
+  }
+
+  if (!authUser) {
+    if (location.pathname === '/signup') {
+      return <SignupPage onRegister={handleRegister} onVerify={handleVerifyEmail} onResendCode={resendRegistrationCode} onAuthenticated={handleLogin} />
+    }
+    return <LoginPage onLogin={handleLogin} errorMessage={authError} />
+  }
+
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <Header offline={offline} />
@@ -547,7 +624,7 @@ function App() {
           <Route path="/" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} />} />
           <Route path="/discover" element={<DiscoverPage requests={requests} userLocation={userLocation} offers={offers} onOffer={offerHelp} />} />
           <Route path="/create" element={<CreateRequestPage onCreate={createRequest} />} />
-          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/profile" element={<ProfilePage user={authUser} onLogout={() => void handleLogout()} />} />
           <Route path="*" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} />} />
         </Routes>
       </main>

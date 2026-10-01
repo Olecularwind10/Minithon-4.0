@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   latitude REAL,
   longitude REAL,
   area TEXT,
+  address TEXT,
   skills TEXT DEFAULT '[]',
   availability TEXT DEFAULT '[]',
   rating REAL DEFAULT 0,

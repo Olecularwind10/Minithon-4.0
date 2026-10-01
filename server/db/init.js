@@ -253,6 +253,10 @@ export async function initializeDatabase() {
 
   try {
     db.exec(schemaSql);
+    const userColumns = db.pragma('table_info(users)');
+    if (!userColumns.some((column) => column.name === 'address')) {
+      db.exec('ALTER TABLE users ADD COLUMN address TEXT');
+    }
     seedCoreData();
     console.log('SQLite schema initialized successfully.');
     return true;
