@@ -180,6 +180,17 @@ export async function getUserById(id, { includePrivate = false } = {}) {
   return includePrivate ? toPrivateUser(result.rows[0] || null) : toPublicUser(result.rows[0] || null);
 }
 
+export async function listActiveUsers() {
+  const result = await query(
+    `SELECT id, name, profile_image, latitude, longitude, area, skills, availability,
+            rating, completed_requests, community_verified, status
+     FROM users
+     WHERE status = 'active' AND latitude IS NOT NULL AND longitude IS NOT NULL
+     ORDER BY completed_requests DESC, created_at ASC`,
+  );
+  return result.rows.map((user) => toPublicUser(user));
+}
+
 export async function updateUserProfile(id, updates = {}) {
   const fields = [];
   const values = [];

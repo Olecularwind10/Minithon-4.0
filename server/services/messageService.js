@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { query } from '../config/database.js';
+import * as notificationService from './notificationService.js';
 
 function toBoolean(value) {
   return Number(value || 0) === 1;
@@ -26,6 +27,19 @@ function normalizeConversation(row) {
       createdAt: row.last_message_time,
     } : null,
   };
+}
+
+async function createMessageNotificationSafely(userId, senderName, content) {
+  try {
+    await notificationService.createNotification({
+      userId,
+      type: 'new_message',
+      title: `New message from ${senderName || 'your neighbor'}`,
+      body: content,
+    });
+  } catch (error) {
+    console.error('Unable to create message notification:', error.message);
+  }
 }
 
 async function getConversationRow(conversationId) {
@@ -173,6 +187,9 @@ export async function sendMessage({ conversationId, senderId, content }) {
 
   const result = await query('SELECT * FROM messages WHERE id = ?', [messageId]);
   const message = normalizeMessage(result.rows[0]);
+  const recipientId = conversation.participant_a === senderId ? conversation.participant_b : conversation.participant_a;
+  const senderResult = await query('SELECT name FROM users WHERE id = ?', [senderId]);
+  await createMessageNotificationSafely(recipientId, senderResult.rows[0]?.name, trimmed);
   return { message };
 }
 

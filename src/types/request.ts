@@ -19,6 +19,7 @@ export type HelpRequest = {
   title: string
   description: string
   category: RequestCategory
+  requiredSkills: import('./helper').Skill[]
   latitude: number
   longitude: number
   urgency: RequestUrgency

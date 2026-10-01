@@ -254,3 +254,81 @@ export async function updateOffer(offerId: string, updates: Partial<OfferDraft> 
 export function deleteOffer(offerId: string) {
   return apiRequest<{ success: boolean; id: string }>(`/offers/${encodeURIComponent(offerId)}`, { method: 'DELETE' })
 }
+
+export type Conversation = {
+  id: string
+  request_id?: string | null
+  other_user_id: string
+  other_user_name: string
+  other_user_profile_image?: string | null
+  unreadCount: number
+  createdAt: string
+  lastMessage: { content: string; createdAt: string } | null
+}
+
+export type ChatMessage = {
+  id: string
+  conversation_id: string
+  sender_id: string
+  content: string
+  readStatus: number
+  read: boolean
+  createdAt: string
+}
+
+export type ConversationDetails = {
+  conversation: Conversation & {
+    otherUserName: string
+    otherUserId: string
+    otherUserProfileImage?: string | null
+  }
+  messages: ChatMessage[]
+}
+
+export function fetchConversations() {
+  return apiRequest<{ conversations: Conversation[] }>('/messages/conversations')
+}
+
+export function createConversation(otherUserId: string, requestId?: string) {
+  return apiRequest<ConversationDetails>('/messages/conversations', {
+    method: 'POST',
+    body: jsonBody({ otherUserId, requestId }),
+  })
+}
+
+export function fetchConversation(conversationId: string) {
+  return apiRequest<ConversationDetails>(`/messages/conversations/${encodeURIComponent(conversationId)}`)
+}
+
+export function sendConversationMessage(conversationId: string, content: string) {
+  return apiRequest<{ message: ChatMessage }>(`/messages/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: 'POST',
+    body: jsonBody({ content }),
+  })
+}
+
+export function markConversationRead(conversationId: string) {
+  return apiRequest<{ success: boolean }>(`/messages/conversations/${encodeURIComponent(conversationId)}/read`, { method: 'PATCH' })
+}
+
+export type NotificationItem = {
+  id: string
+  type: string
+  title: string
+  body: string
+  read: boolean
+  readStatus: number
+  createdAt: string
+}
+
+export function fetchNotifications() {
+  return apiRequest<{ notifications: NotificationItem[] }>('/notifications')
+}
+
+export function markNotificationRead(notificationId: string) {
+  return apiRequest<{ notification: NotificationItem }>(`/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'PATCH' })
+}
+
+export function markAllNotificationsRead() {
+  return apiRequest<{ success: boolean }>('/notifications/read-all', { method: 'PATCH' })
+}

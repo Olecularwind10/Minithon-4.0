@@ -1,7 +1,16 @@
 import crypto from 'node:crypto';
 import { query } from '../config/database.js';
+import * as notificationService from './notificationService.js';
 
 const VALID_REQUEST_STATUSES = new Set(['open', 'responses', 'accepted', 'in_progress', 'completed', 'cancelled']);
+
+async function createNotificationSafely(input) {
+  try {
+    await notificationService.createNotification(input);
+  } catch (error) {
+    console.error('Unable to create request notification:', error.message);
+  }
+}
 
 function parseJson(value, fallback = []) {
   if (value === null || value === undefined || value === '') return fallback;
@@ -211,6 +220,12 @@ export async function respondToRequest(requestId, helperId, payload = {}) {
   await query('UPDATE help_requests SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['responses', requestId]);
 
   const result = await query('SELECT * FROM matches WHERE id = ?', [matchId]);
+  await createNotificationSafely({
+    userId: request.requester_id,
+    type: 'request_response',
+    title: 'Someone offered to help',
+    body: `A neighbor responded to “${request.title}”. Review their offer when you are ready.`,
+  });
   return {
     message: 'Response recorded successfully.',
     match: result.rows[0],
@@ -239,6 +254,15 @@ export async function acceptHelper(requestId, requesterId, helperId) {
     'UPDATE help_requests SET selected_helper_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     [helperId, 'accepted', requestId],
   );
+
+  const helperResult = await query('SELECT name FROM users WHERE id = ?', [helperId]);
+  const helperName = helperResult.rows[0]?.name || 'The requester';
+  await createNotificationSafely({
+    userId: helperId,
+    type: 'request_accepted',
+    title: 'Your help was accepted',
+    body: `${helperName} accepted your offer for “${request.title}”. You can chat to coordinate the details.`,
+  });
 
   return getRequestById(requestId);
 }

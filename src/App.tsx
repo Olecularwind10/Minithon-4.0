@@ -6,9 +6,11 @@ import {
   Check,
   ChevronDown,
   Clock3,
+  Download,
   HeartHandshake,
   House,
   MapPin,
+  MessageCircle,
   Plus,
   Search,
   Sparkles,
@@ -29,6 +31,7 @@ import {
   clearAuthSession,
   completeRequest,
   createRequest,
+  createConversation,
   deleteRequest,
   fetchCurrentUser,
   fetchRequestResponses,
@@ -46,7 +49,11 @@ import {
 } from './lib/api'
 import AuthScreen from './components/AuthScreen'
 import AccountPage from './components/AccountPage'
+import ChatPage from './components/ChatPage'
+import NotificationBell from './components/NotificationBell'
 import { getCurrentLocation } from './services/locationService'
+import { getHelpers } from './services/helperService'
+import type { HelperProfile } from './types/helper'
 import { MUMBAI_FALLBACK_LOCATION, type LocationCoordinates } from './types/location'
 import {
   REQUEST_CATEGORIES,
@@ -56,15 +63,19 @@ import {
   type RequestStatus,
   type RequestUrgency,
 } from './types/request'
+import { DEFAULT_REQUIRED_SKILLS } from './types/requestSkills'
 import { enrichRequests, filterRequests, getNearbyRequests, formatRequestDate, RADIUS_OPTIONS, type RadiusKm } from './utils/locationFilters'
+import { calculateDistance } from './utils/distance'
 
 export type HelpRequest = Omit<LocationHelpRequest, 'status'> & {
   status: RequestStatus
+  requesterId: string
+  selectedHelperId: string | null
   isMine: boolean
   offeredByMe: boolean
   matched: boolean
 }
-type AppEnrichedRequest = EnrichedHelpRequest & Pick<HelpRequest, 'isMine' | 'offeredByMe' | 'matched'>
+type AppEnrichedRequest = Omit<HelpRequest, 'status'> & EnrichedHelpRequest & Pick<HelpRequest, 'status' | 'requesterId' | 'selectedHelperId' | 'isMine' | 'offeredByMe' | 'matched'>
 
 const categories = ['All', ...REQUEST_CATEGORIES]
 const urgencyOptions = ['All', 'Low', 'Medium', 'High', 'Urgent'] as const
@@ -97,9 +108,12 @@ function toHelpRequest(record: BackendRequest, currentUserId: string): HelpReque
 
   return {
     id: record.id,
+    requesterId: record.requester_id,
+    selectedHelperId: record.selected_helper_id,
     title: record.title,
     description: record.description,
     category,
+    requiredSkills: DEFAULT_REQUIRED_SKILLS[category],
     latitude: record.latitude ?? MUMBAI_FALLBACK_LOCATION.latitude,
     longitude: record.longitude ?? MUMBAI_FALLBACK_LOCATION.longitude,
     urgency: (record.urgency.charAt(0).toUpperCase() + record.urgency.slice(1)) as RequestUrgency,
@@ -155,6 +169,9 @@ function Header({ offline }: { offline: boolean }) {
           <NavLink to="/discover" className={({ isActive }) => `rounded-full px-4 py-2 text-sm font-semibold ${isActive ? 'active' : ''}`}>
             Discover
           </NavLink>
+          <NavLink to="/chats" className={({ isActive }) => `rounded-full px-4 py-2 text-sm font-semibold ${isActive ? 'active' : ''}`}>
+            Chats
+          </NavLink>
           <NavLink to="/profile" className={({ isActive }) => `rounded-full px-4 py-2 text-sm font-semibold ${isActive ? 'active' : ''}`}>
             Profile
           </NavLink>
@@ -162,13 +179,62 @@ function Header({ offline }: { offline: boolean }) {
             <Plus size={16} /> Ask for help
           </Link>
         </nav>
-        {offline && (
-          <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-surface-soft px-3 py-1.5 text-xs font-semibold text-ink">
-            <WifiOff size={14} /> Offline
-          </span>
-        )}
+        <div className="header-status"><NotificationBell />{offline && <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-surface-soft px-3 py-1.5 text-xs font-semibold text-ink"><WifiOff size={14} /> Offline</span>}</div>
       </div>
     </header>
+  )
+}
+
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
+
+function InstallPrompt() {
+  const [installEvent, setInstallEvent] = useState<InstallPromptEvent | null>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const dismissedAt = Number(localStorage.getItem('neighborly-install-dismissed') || 0)
+    if (dismissedAt && Date.now() - dismissedAt < 7 * 24 * 60 * 60 * 1000) return
+
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallEvent(event as InstallPromptEvent)
+      setVisible(true)
+    }
+    const onInstalled = () => setVisible(false)
+    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt)
+    window.addEventListener('appinstalled', onInstalled)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt)
+      window.removeEventListener('appinstalled', onInstalled)
+    }
+  }, [])
+
+  if (!visible || !installEvent) return null
+
+  async function installApp() {
+    const promptEvent = installEvent
+    if (!promptEvent) return
+    await promptEvent.prompt()
+    const choice = await promptEvent.userChoice
+    if (choice.outcome === 'accepted') setVisible(false)
+    setInstallEvent(null)
+  }
+
+  function dismiss() {
+    localStorage.setItem('neighborly-install-dismissed', String(Date.now()))
+    setVisible(false)
+  }
+
+  return (
+    <aside className="install-callout" role="dialog" aria-label="Install Neighborly">
+      <span className="install-callout-icon"><Download size={19} /></span>
+      <span className="install-callout-copy"><strong>Install Neighborly</strong><span>Keep neighborhood help one tap away.</span></span>
+      <button type="button" className="install-callout-action" onClick={() => void installApp}>Install</button>
+      <button type="button" className="install-callout-dismiss" onClick={dismiss} aria-label="Dismiss install prompt"><X size={16} /></button>
+    </aside>
   )
 }
 
@@ -193,6 +259,10 @@ function BottomNavigation({ onOpenActions }: { onOpenActions: () => void }) {
       >
         <Plus size={23} />
       </button>
+      <NavLink to="/chats" className={itemClass}>
+        <MessageCircle size={21} strokeWidth={1.8} />
+        <span>Chats</span>
+      </NavLink>
       <NavLink to="/profile" className={itemClass}>
         <UserRound size={21} strokeWidth={1.8} />
         <span>Profile</span>
@@ -249,6 +319,7 @@ function RequestCard({
   onCancel,
   onComplete,
   onAcceptHelper,
+  onChat,
 }: {
   request: AppEnrichedRequest
   offered: boolean
@@ -258,6 +329,7 @@ function RequestCard({
   onCancel: (id: string) => void
   onComplete: (id: string) => void
   onAcceptHelper: (requestId: string, helperId: string) => void
+  onChat: (otherUserId: string, requestId: string) => void
 }) {
   const [responses, setResponses] = useState<RequestResponse[] | null>(null)
   const [responsesLoading, setResponsesLoading] = useState(false)
@@ -311,6 +383,8 @@ function RequestCard({
         {request.isMine && ['Open', 'Responses'].includes(request.status) && <button type="button" onClick={() => onCancel(request.id)} className="min-h-10 rounded-full border border-line px-4 text-sm font-semibold">Cancel</button>}
         {request.isMine && request.status === 'Open' && <button type="button" onClick={() => onDelete(request.id)} className="min-h-10 rounded-full border border-line px-4 text-sm font-semibold text-action">Delete</button>}
         {request.isMine && request.status === 'In Progress' && <button type="button" onClick={() => onComplete(request.id)} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-action px-4 text-sm font-semibold text-white"><Check size={16} /> Mark complete</button>}
+        {request.isMine && request.selectedHelperId && <button type="button" onClick={() => onChat(request.selectedHelperId!, request.id)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-accent"><MessageCircle size={16} /> Chat</button>}
+        {!request.isMine && request.offeredByMe && <button type="button" onClick={() => onChat(request.requesterId, request.id)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-semibold text-accent"><MessageCircle size={16} /> Chat</button>}
         {request.isMine && request.status === 'Completed' && <span className="inline-flex min-h-10 items-center gap-2 rounded-full bg-accent-soft px-4 text-sm font-semibold text-accent"><Check size={16} /> Completed</span>}
       </div>
       {responsesError && <p role="alert" className="mt-3 text-sm text-action">{responsesError}</p>}
@@ -337,6 +411,7 @@ function HomePage({
   onCancelRequest,
   onCompleteRequest,
   onAcceptHelper,
+  onChat,
   userName,
   loading,
   error,
@@ -352,6 +427,7 @@ function HomePage({
   onCancelRequest: (id: string) => void
   onCompleteRequest: (id: string) => void
   onAcceptHelper: (requestId: string, helperId: string) => void
+  onChat: (otherUserId: string, requestId: string) => void
   userName: string
   loading: boolean
   error: string
@@ -408,7 +484,7 @@ function HomePage({
           {error && <p role="alert" className="text-sm text-action">{error}</p>}
           {!loading && !error && requests.length === 0 && <p className="text-sm text-muted">There are no open requests nearby yet.</p>}
           {!loading && requests.slice(0, 2).map((request) => (
-            <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} />
+            <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} onChat={onChat} />
           ))}
         </div>
       </section>
@@ -418,6 +494,7 @@ function HomePage({
 
 function DiscoverPage({
   requests,
+  helpers,
   userLocation,
   offers,
   onOffer,
@@ -428,8 +505,10 @@ function DiscoverPage({
   onCancelRequest,
   onCompleteRequest,
   onAcceptHelper,
+  onChat,
 }: {
   requests: HelpRequest[]
+  helpers: HelperProfile[]
   userLocation: LocationCoordinates | null
   offers: Record<string, boolean>
   onOffer: (id: string) => void
@@ -440,6 +519,7 @@ function DiscoverPage({
   onCancelRequest: (id: string) => void
   onCompleteRequest: (id: string) => void
   onAcceptHelper: (requestId: string, helperId: string) => void
+  onChat: (otherUserId: string, requestId: string) => void
 }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
@@ -458,6 +538,9 @@ function DiscoverPage({
       query,
     },
   ), [nearbyRequests, searchedRequestIds, category, urgency, date, query])
+  const visibleHelpers = useMemo(() => userLocation
+    ? helpers.filter((helper) => helper.active && calculateDistance(userLocation.latitude, userLocation.longitude, helper.latitude, helper.longitude) <= radiusKm)
+    : [], [helpers, userLocation, radiusKm])
 
   return (
     <div className="page-enter">
@@ -471,29 +554,44 @@ function DiscoverPage({
         <span className="sr-only">Search requests</span>
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search nearby requests" className="field-input pl-11 pr-4" />
       </label>
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-1" aria-label="Filter by category">
-        {categories.map((item) => (
-          <button key={item} type="button" onClick={() => setCategory(item)} aria-pressed={category === item} className={`min-h-9 shrink-0 rounded-full px-4 text-sm font-semibold transition-colors ${category === item ? 'bg-action text-white' : 'border border-line bg-surface text-muted hover:text-ink'}`}>
-            {item}
-          </button>
-        ))}
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
-        <select aria-label="Filter by radius" value={radiusKm} onChange={(event) => { setRadiusKm(Number(event.target.value) as RadiusKm); setSearchedRequestIds(null) }} className="field-input min-h-10 py-2 text-sm">
-          {RADIUS_OPTIONS.map((radius) => <option key={radius} value={radius}>{radius} km radius</option>)}
-        </select>
-        <select aria-label="Filter by urgency" value={urgency} onChange={(event) => setUrgency(event.target.value)} className="field-input min-h-10 py-2 text-sm">
-          {urgencyOptions.map((item) => <option key={item} value={item}>{item === 'All' ? 'All urgency' : item}</option>)}
-        </select>
-        <select aria-label="Filter by date" value={date} onChange={(event) => setDate(event.target.value)} className="field-input min-h-10 py-2 text-sm">
-          {dateOptions.map((item) => <option key={item} value={item}>{item === 'All' ? 'Any date' : item}</option>)}
-        </select>
-      </div>
+      <section className="discover-filters" aria-label="Filter nearby requests">
+        <div className="filter-section-heading">
+          <span className="field-label mb-0">Browse by category</span>
+          <span className="filter-count">{visibleRequests.length} nearby</span>
+        </div>
+        <div className="category-filters" aria-label="Filter by category">
+          {categories.map((item) => (
+            <button key={item} type="button" onClick={() => setCategory(item)} aria-pressed={category === item} className={`category-filter ${category === item ? 'is-active' : ''}`}>
+              {item}
+            </button>
+          ))}
+        </div>
+        <div className="filter-selects">
+          <label>
+            <span className="filter-select-label">Distance</span>
+            <select aria-label="Filter by radius" value={radiusKm} onChange={(event) => { setRadiusKm(Number(event.target.value) as RadiusKm); setSearchedRequestIds(null) }} className="field-input min-h-10 py-2 text-sm">
+              {RADIUS_OPTIONS.map((radius) => <option key={radius} value={radius}>{radius} km radius</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="filter-select-label">Urgency</span>
+            <select aria-label="Filter by urgency" value={urgency} onChange={(event) => setUrgency(event.target.value)} className="field-input min-h-10 py-2 text-sm">
+              {urgencyOptions.map((item) => <option key={item} value={item}>{item === 'All' ? 'All urgency' : item}</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="filter-select-label">When</span>
+            <select aria-label="Filter by date" value={date} onChange={(event) => setDate(event.target.value)} className="field-input min-h-10 py-2 text-sm">
+              {dateOptions.map((item) => <option key={item} value={item}>{item === 'All' ? 'Any date' : item}</option>)}
+            </select>
+          </label>
+        </div>
+      </section>
       <div className="mt-6 grid items-start gap-5 lg:grid-cols-[1fr_1.08fr]">
         <div className="lg:sticky lg:top-5">
           <Suspense fallback={<div role="status" className="map-loading">Loading neighborhood map</div>}>
             {userLocation ? (
-              <RequestMap key={`${userLocation.latitude}-${userLocation.longitude}`} requests={visibleRequests} userLocation={userLocation} onSearchThisArea={setSearchedRequestIds} />
+              <RequestMap key={`${userLocation.latitude}-${userLocation.longitude}`} requests={visibleRequests} helpers={visibleHelpers} userLocation={userLocation} onSearchThisArea={setSearchedRequestIds} />
             ) : <div role="status" className="map-loading">Finding your live location</div>}
           </Suspense>
         </div>
@@ -509,7 +607,7 @@ function DiscoverPage({
           ) : visibleRequests.length > 0 ? (
             <div className="grid gap-3.5">
               {visibleRequests.map((request) => (
-                <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} />
+                <RequestCard key={request.id} request={request} offered={Boolean(offers[request.id] || request.offeredByMe)} onOffer={onOffer} onEdit={onEditRequest} onDelete={onDeleteRequest} onCancel={onCancelRequest} onComplete={onCompleteRequest} onAcceptHelper={onAcceptHelper} onChat={onChat} />
               ))}
             </div>
           ) : (
@@ -536,7 +634,10 @@ function CreateRequestPage({ onSave, userLocation, request }: {
   const [category, setCategory] = useState('Around home')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
-  const [location, setLocation] = useState('Cedar Grove')
+  const [location, setLocation] = useState('')
+  const [requestCoordinates, setRequestCoordinates] = useState<LocationCoordinates | null>(userLocation)
+  const [locationLoading, setLocationLoading] = useState(false)
+  const [locationMessage, setLocationMessage] = useState('')
   const [urgency, setUrgency] = useState<RequestUrgency>('Medium')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -547,15 +648,36 @@ function CreateRequestPage({ onSave, userLocation, request }: {
     setCategory(request?.category ?? 'Around Home')
     setDate(request?.date ?? '')
     setTime(request?.time ?? '')
-    setLocation(request?.locationLabel ?? 'Parel')
+    setLocation(request?.locationLabel ?? '')
+    setRequestCoordinates(userLocation)
+    setLocationMessage('')
     setUrgency(request?.urgency ?? 'Medium')
     setSubmitError('')
-  }, [request])
+  }, [request, userLocation])
+
+  async function useCurrentLocation() {
+    setLocationLoading(true)
+    setLocationMessage('Requesting your approximate location…')
+    const result = await getCurrentLocation()
+    setLocationLoading(false)
+    if (result.source === 'browser') {
+      setRequestCoordinates(result.location)
+      setLocation('Nearby')
+      setLocationMessage('Using your approximate GPS location. Your exact address is never shown.')
+      return
+    }
+    setLocationMessage('Location permission was unavailable. Choose your neighborhood below instead.')
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setSubmitting(true)
     setSubmitError('')
+    if (!location) {
+      setSubmitError('Choose a nearby neighborhood or use your current location.')
+      setSubmitting(false)
+      return
+    }
     try {
       await onSave({
       title: title.trim(),
@@ -564,8 +686,8 @@ function CreateRequestPage({ onSave, userLocation, request }: {
       area: location.trim(),
       preferredDate: date,
       preferredTime: time,
-      latitude: userLocation?.latitude ?? MUMBAI_FALLBACK_LOCATION.latitude,
-      longitude: userLocation?.longitude ?? MUMBAI_FALLBACK_LOCATION.longitude,
+      latitude: requestCoordinates?.latitude ?? MUMBAI_FALLBACK_LOCATION.latitude,
+      longitude: requestCoordinates?.longitude ?? MUMBAI_FALLBACK_LOCATION.longitude,
       urgency: urgency.toLowerCase(),
       }, request?.id)
       navigate('/')
@@ -627,12 +749,20 @@ function CreateRequestPage({ onSave, userLocation, request }: {
           </div>
           <label>
             <span className="field-label">Nearby location</span>
-            <span className="relative block">
-              <MapPin size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted" />
-                <select required value={location} onChange={(event) => setLocation(event.target.value as (typeof neighborhoodAreas)[number])} className="field-input pl-11">
+            <div className="location-picker">
+              <button type="button" className={`location-gps-button ${location === 'Nearby' ? 'is-active' : ''}`} onClick={() => void useCurrentLocation()} disabled={locationLoading}>
+                <MapPin size={17} />
+                <span><strong>{locationLoading ? 'Finding you…' : 'Use my current location'}</strong><small>Approximate location only</small></span>
+              </button>
+              <span className="location-or"><span>or choose an area</span></span>
+              <span className="relative block">
+                <select required value={location === 'Nearby' ? '' : location} onChange={(event) => { setLocation(event.target.value); setLocationMessage('') }} className="field-input">
+                  <option value="">Select your neighborhood</option>
                   {neighborhoodAreas.map((area) => <option key={area} value={area}>{area}</option>)}
                 </select>
-            </span>
+              </span>
+              {locationMessage && <span className={`location-message ${location === 'Nearby' ? 'is-success' : ''}`} role="status">{locationMessage}</span>}
+            </div>
           </label>
         </div>
         {submitError && <p role="alert" className="mt-5 text-sm font-semibold text-action">{submitError}</p>}
@@ -658,6 +788,7 @@ function App() {
   const [session, setSession] = useState<AuthSession | null>(() => readAuthSession())
   const [sessionLoading, setSessionLoading] = useState(() => Boolean(readAuthSession()))
   const [requests, setRequests] = useState<HelpRequest[]>([])
+  const [helpers, setHelpers] = useState<HelperProfile[]>([])
   const [userLocation, setUserLocation] = useState<LocationCoordinates | null>(null)
   const [offers, setOffers] = useState<Record<string, boolean>>({})
   const [showActions, setShowActions] = useState(false)
@@ -701,13 +832,14 @@ function App() {
 
   useEffect(() => {
     let active = true
-    getCurrentLocation().then((location) => { if (active) setUserLocation(location) })
+    getCurrentLocation().then(({ location }) => { if (active) setUserLocation(location) })
     return () => { active = false }
   }, [])
 
   useEffect(() => {
     if (!session) {
       setRequests([])
+      setHelpers([])
       setOffers({})
       setRequestsLoading(false)
       return
@@ -729,6 +861,11 @@ function App() {
     return () => { active = false }
   }, [session?.user.id])
 
+  useEffect(() => {
+    if (!session) return
+    void getHelpers().then(setHelpers).catch(() => setHelpers([]))
+  }, [session?.user.id])
+
   async function refreshRequests() {
     if (!session) return
     const records = await fetchRequests()
@@ -744,6 +881,15 @@ function App() {
       setNotice('Your response was sent to the requester.')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not respond to request')
+    }
+  }
+
+  async function openChat(otherUserId: string, requestId: string) {
+    try {
+      const conversation = await createConversation(otherUserId, requestId)
+      navigate(`/chats?conversation=${encodeURIComponent(conversation.conversation.id)}`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not open chat')
     }
   }
 
@@ -827,18 +973,21 @@ function App() {
   const enrichedRequests = useMemo(() => enrichRequests(requests, activeLocation), [requests, activeLocation])
 
   if (sessionLoading) return <main className="grid min-h-screen place-items-center bg-canvas text-sm text-muted">Restoring your session…</main>
-  if (!session) return <AuthScreen onAuthenticated={setSession} />
+  if (!session) return <><AuthScreen onAuthenticated={setSession} /><InstallPrompt /></>
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
+      <InstallPrompt />
+      <div className="mobile-notification"><NotificationBell /></div>
       <Header offline={offline} />
       <main className="app-main">
         <Routes>
-          <Route path="/" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
-          <Route path="/discover" element={<DiscoverPage requests={requests} userLocation={userLocation} offers={offers} onOffer={offerHelp} loading={requestsLoading} error={requestsError} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} />} />
+          <Route path="/" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} onChat={openChat} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
+          <Route path="/discover" element={<DiscoverPage requests={requests} helpers={helpers} userLocation={userLocation} offers={offers} onOffer={offerHelp} onChat={openChat} loading={requestsLoading} error={requestsError} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} />} />
           <Route path="/create" element={<CreateRequestPage onSave={saveRequest} userLocation={userLocation} request={editingRequest} />} />
           <Route path="/profile" element={<ProfilePage user={session.user} location={activeLocation} onUserUpdated={updateUser} onLogout={signOut} />} />
-          <Route path="*" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
+          <Route path="/chats" element={<ChatPage session={session} />} />
+          <Route path="*" element={<HomePage requests={enrichedRequests} offers={offers} onOffer={offerHelp} onChat={openChat} notice={notice} onDismissNotice={() => setNotice('')} onOfferHelp={goOfferHelp} onEditRequest={(request) => { setEditingRequest(request); navigate('/create') }} onDeleteRequest={deleteOwnedRequest} onCancelRequest={cancelOwnedRequest} onCompleteRequest={completeOwnedRequest} onAcceptHelper={acceptHelper} userName={session.user.name} loading={requestsLoading} error={requestsError} />} />
         </Routes>
       </main>
       <BottomNavigation onOpenActions={() => setShowActions(true)} />

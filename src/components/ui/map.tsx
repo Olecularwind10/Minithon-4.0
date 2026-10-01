@@ -904,7 +904,7 @@ function MapControls({
       },
       // Without a timeout the spec default is Infinity: a dismissed permission
       // prompt would leave the button disabled forever.
-      { timeout: 10000 },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
     );
   }, [map, onLocate]);
 
